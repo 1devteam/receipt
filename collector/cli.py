@@ -34,19 +34,30 @@ def main(argv: list[str] | None = None) -> int:
         epilog=(
             "Exit codes: 0 ok, 1 usage/input error, 2 empty catalog (no .py kept). "
             "-o directory writes a catalog (receipts.json + copies/ + index.json); "
-            "-o file.json writes receipts only."
+            "-o file.json writes receipts only. "
+            "tree may be a local path or a GitHub spec "
+            "(https://github.com/owner/repo, github:owner/repo@ref, owner/repo). "
+            "Private repos: GITHUB_TOKEN or GH_TOKEN."
         ),
     )
-    p.add_argument("tree", help="source .py file or directory tree")
+    p.add_argument(
+        "tree",
+        help="local .py file/tree, or GitHub URL / owner/repo[@ref][:path]",
+    )
     p.add_argument(
         "-o",
         "--out",
         required=True,
         help="catalog directory, or receipts.json path",
     )
+    p.add_argument(
+        "--ref",
+        default=None,
+        help="GitHub ref (branch, tag, or SHA). overrides ref in the spec",
+    )
     args = p.parse_args(argv)
     try:
-        data = collect_to(Path(args.tree), Path(args.out))
+        data = collect_to(args.tree, Path(args.out), ref=args.ref)
     except CollectError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -54,26 +65,25 @@ def main(argv: list[str] | None = None) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    print(
-        json.dumps(
-            {
-                "catalog": data.get("catalog") or str(Path(args.out).resolve()),
-                "files": len(data["files"]),
-                "skipped": len(data["skipped"]),
-                "syntax_ok": sum(1 for f in data["files"] if f.get("syntax_ok")),
-                "with_main_stripped": sum(1 for f in data["files"] if f.get("has_main")),
-                "ownership_stripped": sum(
-                    1 for f in data["files"] if f.get("ownership_stripped")
-                ),
-                "with_contracts": sum(
-                    1
-                    for f in data["files"]
-                    if (f.get("contracts") or {}).get("classes")
-                    or (f.get("contracts") or {}).get("functions")
-                ),
-                "onboard": data.get("onboard"),
-            },
-            indent=2,
-        )
-    )
+    summary = {
+        "catalog": data.get("catalog") or str(Path(args.out).resolve()),
+        "files": len(data["files"]),
+        "skipped": len(data["skipped"]),
+        "syntax_ok": sum(1 for f in data["files"] if f.get("syntax_ok")),
+        "with_main_stripped": sum(1 for f in data["files"] if f.get("has_main")),
+        "ownership_stripped": sum(
+            1 for f in data["files"] if f.get("ownership_stripped")
+        ),
+        "with_contracts": sum(
+            1
+            for f in data["files"]
+            if (f.get("contracts") or {}).get("classes")
+            or (f.get("contracts") or {}).get("functions")
+        ),
+        "onboard": data.get("onboard"),
+    }
+    if data.get("source"):
+        summary["source"] = data["source"]
+        summary["root"] = data.get("root")
+    print(json.dumps(summary, indent=2))
     return 0 if data["files"] else 2

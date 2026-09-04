@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 from collector.collect import CollectError
+from collector.github import GitHubError
 from common.io import ReceiptIOError
 from pipeline.build import build
 from producer.produce import ProduceError
@@ -23,21 +24,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = p.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build")
-    b.add_argument("tree")
+    b.add_argument("tree", help="local tree or GitHub spec")
     b.add_argument("--name", required=True)
     b.add_argument("-o", "--out", required=True)
     b.add_argument("--work", default=None, help="staging dir (default: temp)")
+    b.add_argument("--ref", default=None, help="GitHub ref (branch, tag, or SHA)")
     args = p.parse_args(argv)
     if args.cmd != "build":
         return 1
     try:
         if args.work:
             work = Path(args.work)
-            roster = build(Path(args.tree), args.name, Path(args.out), work)
+            roster = build(args.tree, args.name, Path(args.out), work, ref=args.ref)
         else:
             with tempfile.TemporaryDirectory(prefix="pipeline-") as tmp:
-                roster = build(Path(args.tree), args.name, Path(args.out), Path(tmp))
-    except (CollectError, ProduceError, ReceiptIOError, SystemExit) as exc:
+                roster = build(args.tree, args.name, Path(args.out), Path(tmp), ref=args.ref)
+    except (CollectError, GitHubError, ProduceError, ReceiptIOError, SystemExit) as exc:
         msg = exc.code if isinstance(exc, SystemExit) and isinstance(exc.code, str) else str(exc)
         if msg:
             print(msg, file=sys.stderr)

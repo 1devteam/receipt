@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+from collector.github import GitHubError, is_github_spec, snapshot_github
 from collector.onboard import onboard_file, tops_from_rels
 from common.io import write_json
 from common.refuse import refused
@@ -29,8 +31,31 @@ def _candidates(root: Path) -> tuple[Path, list[Path]]:
     return root, sorted(root.rglob("*.py"))
 
 
-def collect(root: Path) -> dict:
-    root = Path(root)
+def collect(root: Path | str, *, ref: str | None = None) -> dict:
+    spec = str(root).strip()
+    if is_github_spec(spec):
+        cleanup: Path | None = None
+        try:
+            scan_root, gh, cleanup = snapshot_github(spec, ref=ref)
+            data = _collect_local(scan_root)
+            data["source"] = gh.as_meta()
+            data["root"] = gh.page_url()
+            for rec in data["files"]:
+                rec["abs"] = gh.blob_url(rec["rel"])
+            return data
+        except GitHubError as exc:
+            raise CollectError(str(exc)) from exc
+        finally:
+            if cleanup is not None:
+                shutil.rmtree(cleanup, ignore_errors=True)
+
+    path = Path(spec).expanduser()
+    if not path.exists():
+        raise CollectError(f"tree does not exist: {path}")
+    return _collect_local(path.resolve())
+
+
+def _collect_local(root: Path) -> dict:
     if not root.exists():
         raise CollectError(f"tree does not exist: {root}")
 
@@ -103,39 +128,48 @@ def _index(files: list[dict]) -> dict:
     return symbols
 
 
-def collect_to(root: Path, out: Path) -> dict:
+def collect_to(root: Path | str, out: Path, *, ref: str | None = None) -> dict:
     """Write receipts. If out is a directory (or has no .json suffix), write a catalog."""
-    data = collect(root)
-    out = Path(out).resolve()
+    data = collect(root, ref=ref)
+    out = Path(out).expanduser().resolve()
     catalog_dir = out if out.suffix != ".json" else out.parent
     receipts_path = out if out.suffix == ".json" else out / "receipts.json"
     catalog_mode = out.suffix != ".json"
+    # Remote origins vanish after the snapshot is deleted; keep copies so compile still works.
+    persist_copies = catalog_mode or bool(data.get("source"))
 
-    if catalog_mode:
+    if persist_copies:
         copies = catalog_dir / "copies"
-        contracts_dir = catalog_dir / "contracts"
-        deps_dir = catalog_dir / "dependencies"
         copies.mkdir(parents=True, exist_ok=True)
-        contracts_dir.mkdir(parents=True, exist_ok=True)
-        deps_dir.mkdir(parents=True, exist_ok=True)
+        if catalog_mode:
+            contracts_dir = catalog_dir / "contracts"
+            deps_dir = catalog_dir / "dependencies"
+            contracts_dir.mkdir(parents=True, exist_ok=True)
+            deps_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            contracts_dir = None
+            deps_dir = None
 
         for rec in data["files"]:
             body = rec.get("stripped")
             if body is not None:
                 (copies / f"{rec['sha256']}.py").write_text(body, encoding="utf-8")
-            write_json(contracts_dir / f"{rec['sha256']}.json", rec.get("contracts") or {})
-            write_json(deps_dir / f"{rec['sha256']}.json", rec.get("dependencies") or {})
+            if catalog_mode:
+                write_json(contracts_dir / f"{rec['sha256']}.json", rec.get("contracts") or {})
+                write_json(deps_dir / f"{rec['sha256']}.json", rec.get("dependencies") or {})
 
-        write_json(catalog_dir / "index.json", _index(data["files"]))
+        if catalog_mode:
+            write_json(catalog_dir / "index.json", _index(data["files"]))
 
     stored = []
     for rec in data["files"]:
         item = {k: v for k, v in rec.items() if k != "stripped"}
-        if catalog_mode and rec.get("stripped") is not None:
+        if persist_copies and rec.get("stripped") is not None:
             sha = rec["sha256"]
             item["copy"] = f"copies/{sha}.py"
-            item["contracts_path"] = f"contracts/{sha}.json"
-            item["dependencies_path"] = f"dependencies/{sha}.json"
+            if catalog_mode:
+                item["contracts_path"] = f"contracts/{sha}.json"
+                item["dependencies_path"] = f"dependencies/{sha}.json"
         stored.append(item)
 
     payload = {**data, "files": stored}

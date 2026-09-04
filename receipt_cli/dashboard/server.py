@@ -208,10 +208,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 out = payload.get("out")
                 if not tree or not out:
                     raise CollectError("tree and out required")
-                tree_path = Path(str(tree)).expanduser().resolve()
+                tree_spec = str(tree).strip()
                 out_path = Path(str(out)).expanduser().resolve()
-                # Keep collect under the configured shelves root unless out is explicit elsewhere.
-                data = collect_to(tree_path, out_path)
+                ref = str(payload["ref"]).strip() if payload.get("ref") else None
+                data = collect_to(tree_spec, out_path, ref=ref or None)
                 # Refresh default catalog pointer if we wrote into catalogs root.
                 if out_path.is_dir() and out_path.parent == self.catalogs_root:
                     self.default_catalog_path = out_path
@@ -221,6 +221,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         "files": len(data.get("files") or []),
                         "skipped": len(data.get("skipped") or []),
                         "onboard": data.get("onboard"),
+                        "source": data.get("source"),
+                        "root": data.get("root"),
                     }
                 )
                 self._send(status, body, ctype)

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 — 2026-09-04
+
+### Added
+- `collect` accepts GitHub specs: repo URL, `/tree` / `/blob` paths, `github:owner/repo@ref`, `owner/repo`
+- `--ref` on `collect` and `pipeline build` to pin branch / tag / SHA
+- Dashboard Collect form accepts GitHub URLs
+- Catalog `source` metadata and blob-URL `abs` for GitHub origins
+- `GITHUB_TOKEN` / `GH_TOKEN` for private repos and rate limits
+
 ## 0.2.0 — 2026-08-27
 
 ### Added

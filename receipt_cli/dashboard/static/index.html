@@ -208,7 +208,7 @@
         <div id="emptyHint" class="hint" hidden>
           No catalogs found. Collect a tree first:
           <code>receipt collect TREE -o ~/projects/catalogs/NAME</code>
-          — or use the Collect form below.
+          — TREE can be a local path or a GitHub URL. Or use the Collect form below.
         </div>
         <div class="status-grid" id="statusGrid"></div>
         <div class="meta" id="onboardNote"></div>
@@ -216,7 +216,7 @@
 
       <div class="pane-title">Collect</div>
       <div class="pad stack">
-        <input id="collectTree" placeholder="tree path (source .py tree)" />
+        <input id="collectTree" placeholder="local path or github.com/owner/repo" />
         <input id="collectOut" placeholder="out catalog path" />
         <button class="primary" id="collectBtn">Collect</button>
         <div class="meta" id="collectMsg"></div>
@@ -627,9 +627,13 @@
           method: "POST",
           body: JSON.stringify({ tree, out }),
         });
+        const src = data.source
+          ? ` · ${data.source.kind} ${data.source.owner}/${data.source.repo}@${data.source.ref}`
+          : "";
         setCollectMsg(
           `collected ${data.files} file(s) → ${data.catalog}` +
-            (data.skipped ? ` · skipped ${data.skipped}` : ""),
+            (data.skipped ? ` · skipped ${data.skipped}` : "") +
+            src,
           "ok"
         );
         state.catalog = data.catalog;

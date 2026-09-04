@@ -39,7 +39,8 @@ def main(argv: list[str] | None = None) -> int:
         description="Receipt CLI — browse and search py receipt shelves",
         epilog=(
             "Shelf commands are first-class. Local UI: receipt dashboard. "
-            "Build steps via collect/compile/produce/direct or receipt stack."
+            "Build steps via collect/compile/produce/direct or receipt stack. "
+            "collect TREE may be a local path or a GitHub spec."
         ),
     )
     p.add_argument("--version", action="version", version=f"receipt {__version__}")

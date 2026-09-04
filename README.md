@@ -14,6 +14,11 @@ Legacy `insert` / `insertc` entry points still ship for old workflows; prefer `r
 # 1. Collect a tree onto a shelf (empty shelves → collect first)
 receipt collect ~/src/mytree -o ~/projects/catalogs/mytree
 
+# or pull .py files from GitHub (public; private needs GITHUB_TOKEN / GH_TOKEN)
+receipt collect https://github.com/owner/repo -o ~/projects/catalogs/repo
+receipt collect github:owner/repo@main:src -o ~/projects/catalogs/repo
+receipt collect owner/repo --ref v1.2.0 -o ~/projects/catalogs/repo
+
 # 2. Browse / search
 receipt catalogs
 receipt status -c ~/projects/catalogs/mytree
@@ -39,6 +44,25 @@ Defaults:
 - Shelves root: `RECEIPT_CATALOGS` (default `~/projects/catalogs`)
 
 If there is no catalog yet, create one with `receipt collect` (or the Collect form in the dashboard).
+
+## GitHub source
+
+`collect` TREE may be a local path **or** a GitHub spec. Receipt downloads a snapshot tarball, then onboard/strip/catalog as usual.
+
+Accepted specs:
+
+- `https://github.com/owner/repo`
+- `https://github.com/owner/repo/tree/branch`
+- `https://github.com/owner/repo/tree/branch/subdir`
+- `https://github.com/owner/repo/blob/branch/path/to/file.py`
+- `github:owner/repo@ref`
+- `github:owner/repo@ref:src/pkg`
+- `owner/repo` and `owner/repo@ref` (only if that path does not already exist locally)
+- `--ref` overrides the ref in the spec (branch, tag, or SHA)
+
+Private repos and higher API rate limits: set `GITHUB_TOKEN` or `GH_TOKEN`. Receipt does not vendor git.
+
+The catalog records `source` (`kind=github`, owner, repo, ref, url). Each receipt `abs` is the GitHub blob URL. Shelf copies are still the compile source of truth.
 
 ## Onboard model
 
@@ -89,6 +113,7 @@ direct check ~/projects/compiled/evolved
 direct call  ~/projects/compiled/evolved i_evolved.CoreStatus CoreStatus.ping VoiceSynth
 
 python -m pipeline build TREE --name evolved --out ~/projects/compiled/evolved
+python -m pipeline build https://github.com/owner/repo --name evolved --out ~/projects/compiled/evolved
 ```
 
 | Program | Job |
