@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.py[cod]
+.venv/
+vault/
+omnipath.db
+*.egg-info/
+dist/
+build/
+.pytest_cache/

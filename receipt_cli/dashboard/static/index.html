@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Receipt Dashboard</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #171d25;
+      --panel2: #1c2430;
+      --border: #2a3544;
+      --text: #e7eef7;
+      --muted: #93a4b8;
+      --accent: #5b9fd4;
+      --accent2: #3d8b6e;
+      --warn: #c9a227;
+      --danger: #c45c5c;
+      --chip: #243041;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.85rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      flex-wrap: wrap;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.05rem;
+      letter-spacing: 0.02em;
+    }
+    header .meta { color: var(--muted); font-size: 12px; }
+    header .spacer { flex: 1; }
+    select, input, button, textarea {
+      font: inherit;
+      color: var(--text);
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.45rem 0.65rem;
+    }
+    button {
+      cursor: pointer;
+      background: #243247;
+    }
+    button.primary { background: #1f4f73; border-color: #2f6f9c; }
+    button.good { background: #1f4a3a; border-color: #2f7a5c; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    main {
+      display: grid;
+      grid-template-columns: 280px 1fr 380px;
+      gap: 0;
+      min-height: calc(100vh - 58px);
+    }
+    aside, section, .detail {
+      border-right: 1px solid var(--border);
+      min-height: calc(100vh - 58px);
+    }
+    .detail { border-right: none; overflow: auto; max-height: calc(100vh - 58px); }
+    .pane-title {
+      padding: 0.75rem 1rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      border-bottom: 1px solid var(--border);
+    }
+    .pad { padding: 0.85rem 1rem; }
+    .stack { display: flex; flex-direction: column; gap: 0.55rem; }
+    .row { display: flex; gap: 0.5rem; align-items: center; }
+    .row > * { min-width: 0; }
+    .grow { flex: 1; }
+    .list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      overflow: auto;
+      max-height: calc(100vh - 220px);
+    }
+    .list li {
+      padding: 0.65rem 1rem;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      display: flex;
+      gap: 0.55rem;
+      align-items: flex-start;
+    }
+    .list li:hover, .list li.active { background: var(--panel2); }
+    .list li .body { flex: 1; min-width: 0; }
+    .list .rel { font-weight: 600; word-break: break-all; }
+    .list .sub { color: var(--muted); font-size: 12px; margin-top: 0.2rem; }
+    .list input[type="checkbox"] {
+      margin-top: 0.2rem;
+      accent-color: var(--accent);
+      width: 1rem;
+      height: 1rem;
+      cursor: pointer;
+    }
+    .chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.35rem; }
+    .chip {
+      background: var(--chip);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.1rem 0.5rem;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .chip.on { color: var(--text); border-color: #3d5a7a; background: #243247; }
+    .chip.seed {
+      cursor: pointer;
+      color: var(--text);
+      border-color: #3d5a7a;
+      background: #243247;
+    }
+    .chip.seed:hover { border-color: var(--danger); color: #f0b4b4; }
+    .chip.seed::after { content: " ×"; opacity: 0.7; }
+    pre {
+      background: #0c1015;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+      overflow: auto;
+      max-height: 280px;
+      font-size: 12px;
+    }
+    pre.source { max-height: 360px; white-space: pre; }
+    .status-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+    .stat {
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.55rem 0.65rem;
+    }
+    .stat b { display: block; font-size: 1.1rem; }
+    .stat span { color: var(--muted); font-size: 11px; }
+    .err { color: var(--danger); white-space: pre-wrap; }
+    .ok { color: #7dcea0; }
+    .warn { color: var(--warn); }
+    .selected-box {
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.55rem;
+      min-height: 70px;
+      max-height: 140px;
+      overflow: auto;
+      font-size: 12px;
+    }
+    .hint {
+      background: #1a2430;
+      border: 1px dashed #3a4d63;
+      border-radius: 8px;
+      padding: 0.75rem;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .hint code { color: var(--accent); }
+    label.check {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      color: var(--muted);
+      font-size: 13px;
+      user-select: none;
+    }
+    label.check input { accent-color: var(--accent); }
+    @media (max-width: 1100px) {
+      main { grid-template-columns: 1fr; }
+      aside, section, .detail { min-height: auto; border-right: none; border-bottom: 1px solid var(--border); max-height: none; }
+      .list { max-height: 320px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Receipt</h1>
+    <div class="meta" id="meta">shelf dashboard</div>
+    <div class="spacer"></div>
+    <label class="row">
+      <span class="meta">catalog</span>
+      <select id="catalogSelect"></select>
+    </label>
+    <button id="refreshBtn">Refresh</button>
+  </header>
+
+  <main>
+    <aside>
+      <div class="pane-title">Shelf status</div>
+      <div class="pad stack">
+        <div id="emptyHint" class="hint" hidden>
+          No catalogs found. Collect a tree first:
+          <code>receipt collect TREE -o ~/projects/catalogs/NAME</code>
+          — or use the Collect form below.
+        </div>
+        <div class="status-grid" id="statusGrid"></div>
+        <div class="meta" id="onboardNote"></div>
+      </div>
+
+      <div class="pane-title">Collect</div>
+      <div class="pad stack">
+        <input id="collectTree" placeholder="tree path (source .py tree)" />
+        <input id="collectOut" placeholder="out catalog path" />
+        <button class="primary" id="collectBtn">Collect</button>
+        <div class="meta" id="collectMsg"></div>
+      </div>
+
+      <div class="pane-title">Find symbol</div>
+      <div class="pad stack">
+        <div class="row">
+          <input class="grow" id="findInput" placeholder="ping, Fork, Guardian…" />
+          <button id="findBtn">Find</button>
+        </div>
+        <ul class="list" id="findList" style="max-height:220px"></ul>
+      </div>
+    </aside>
+
+    <section>
+      <div class="pane-title">Receipts</div>
+      <div class="pad stack">
+        <div class="row">
+          <input class="grow" id="listQuery" placeholder="Filter path / class / sha" />
+          <button id="listBtn">List</button>
+          <button id="addVisibleBtn" title="Add all currently listed rows to selection">Add visible</button>
+        </div>
+        <div class="meta" id="listCount"></div>
+      </div>
+      <ul class="list" id="receiptList"></ul>
+    </section>
+
+    <div class="detail">
+      <div class="pane-title">Inspect</div>
+      <div class="pad stack" id="inspectEmpty"><div class="meta">Select a receipt</div></div>
+      <div class="pad stack" id="inspectPane" hidden>
+        <div>
+          <div class="rel" id="inspRel" style="font-weight:700;word-break:break-all"></div>
+          <div class="sub meta" id="inspMeta"></div>
+          <div class="chips" id="inspChips"></div>
+        </div>
+        <div class="row">
+          <button id="addSeedBtn">Add to selection</button>
+          <button id="showRawBtn">Raw JSON</button>
+          <button id="loadSourceBtn">Source</button>
+        </div>
+        <div>
+          <div class="meta">Source preview</div>
+          <pre class="source" id="inspSource"><span class="meta">Click Source to load shelf copy</span></pre>
+        </div>
+        <div>
+          <div class="meta">Contracts</div>
+          <pre id="inspContracts"></pre>
+        </div>
+        <div>
+          <div class="meta">Dependencies</div>
+          <pre id="inspDeps"></pre>
+        </div>
+      </div>
+
+      <div class="pane-title">Selection → plan / stack</div>
+      <div class="pad stack">
+        <div class="selected-box" id="seedBox"><span class="meta">No seeds yet — check rows or Add to selection</span></div>
+        <div class="row">
+          <button id="clearSeedsBtn">Clear</button>
+          <button class="primary" id="planBtn">Plan</button>
+        </div>
+        <div class="row">
+          <input class="grow" id="stackName" placeholder="name (e.g. spine)" />
+        </div>
+        <div class="row">
+          <input class="grow" id="stackOut" placeholder="out dir (e.g. ~/projects/compiled/spine)" />
+        </div>
+        <label class="check">
+          <input type="checkbox" id="stackForce" />
+          Force (allow missing/ambiguous local deps)
+        </label>
+        <button class="good" id="stackBtn">Stack</button>
+        <div id="actionMsg" class="meta"></div>
+        <pre id="actionOut" hidden></pre>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const LIST_LIMIT = 300;
+    const state = {
+      catalogsRoot: null,
+      catalog: null,
+      seeds: [],
+      activeRel: null,
+      lastShow: null,
+      lastList: [],
+      lastListLimit: LIST_LIMIT,
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    async function api(path, opts = {}) {
+      const res = await fetch(path, {
+        headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+        ...opts,
+      });
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(res.statusText || "bad response");
+      }
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    function setMsg(text, cls = "") {
+      const el = $("actionMsg");
+      el.className = cls || "meta";
+      el.textContent = text || "";
+    }
+
+    function setCollectMsg(text, cls = "") {
+      const el = $("collectMsg");
+      el.className = cls || "meta";
+      el.textContent = text || "";
+    }
+
+    function addSeed(rel) {
+      if (!rel) return;
+      if (!state.seeds.includes(rel)) state.seeds.push(rel);
+      renderSeeds();
+      syncCheckboxes();
+    }
+
+    function removeSeed(rel) {
+      state.seeds = state.seeds.filter((s) => s !== rel);
+      renderSeeds();
+      syncCheckboxes();
+    }
+
+    function renderSeeds() {
+      const box = $("seedBox");
+      if (!state.seeds.length) {
+        box.innerHTML = '<span class="meta">No seeds yet — check rows or Add to selection</span>';
+        return;
+      }
+      box.innerHTML = state.seeds
+        .map(
+          (s) =>
+            `<span class="chip seed" data-seed="${s.replace(/"/g, "&quot;")}" title="Click to remove">${s}</span>`
+        )
+        .join(" ");
+      box.querySelectorAll(".chip.seed").forEach((el) => {
+        el.onclick = () => removeSeed(el.dataset.seed);
+      });
+    }
+
+    function syncCheckboxes() {
+      const selected = new Set(state.seeds);
+      $("receiptList").querySelectorAll("li").forEach((li) => {
+        const cb = li.querySelector('input[type="checkbox"]');
+        if (cb) cb.checked = selected.has(cb.dataset.rel);
+      });
+    }
+
+    function renderStatus(s) {
+      if (!s) {
+        $("statusGrid").innerHTML = "";
+        $("onboardNote").textContent = "";
+        return;
+      }
+      const entries = [
+        ["files", s.files],
+        ["symbols", s.symbols],
+        ["contracts", s.with_contracts],
+        ["copies", s.copies],
+        ["ownership stripped", s.ownership_stripped],
+        ["external deps", s.with_external_deps],
+      ];
+      $("statusGrid").innerHTML = entries
+        .map(([k, v]) => `<div class="stat"><b>${v ?? "—"}</b><span>${k}</span></div>`)
+        .join("");
+      const onboard = s.onboard
+        ? `strip: ${(s.onboard.strip || []).join(", ")} · extract: ${(s.onboard.extract || []).join(", ")}`
+        : "";
+      $("onboardNote").textContent = onboard;
+    }
+
+    function renderReceipts(rows, meta = {}) {
+      state.lastList = rows || [];
+      const limit = meta.limit != null ? meta.limit : state.lastListLimit;
+      state.lastListLimit = limit;
+      const count = meta.count != null ? meta.count : rows.length;
+      let note = `${count} shown`;
+      if (limit != null) note += ` (limit ${limit})`;
+      $("listCount").textContent = note;
+
+      const ul = $("receiptList");
+      ul.innerHTML = "";
+      for (const r of rows) {
+        const li = document.createElement("li");
+        if (r.rel === state.activeRel) li.classList.add("active");
+
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.dataset.rel = r.rel;
+        cb.checked = state.seeds.includes(r.rel);
+        cb.onclick = (e) => {
+          e.stopPropagation();
+          if (cb.checked) addSeed(r.rel);
+          else removeSeed(r.rel);
+        };
+
+        const body = document.createElement("div");
+        body.className = "body";
+        body.innerHTML = `
+          <div class="rel">${r.rel}</div>
+          <div class="sub">${(r.classes || []).join(", ") || "(no classes)"}</div>
+          <div class="chips">
+            ${(r.external_deps || []).slice(0, 4).map((d) => `<span class="chip">${d}</span>`).join("")}
+            ${r.ownership_stripped ? '<span class="chip on">stripped</span>' : ""}
+          </div>`;
+        body.onclick = () => showReceipt(r.rel);
+
+        li.appendChild(cb);
+        li.appendChild(body);
+        ul.appendChild(li);
+      }
+    }
+
+    function renderFind(hits) {
+      const ul = $("findList");
+      ul.innerHTML = "";
+      for (const h of hits) {
+        const li = document.createElement("li");
+        li.innerHTML = `<div class="body"><div class="rel">${h.symbol}</div><div class="sub">${h.rel}</div></div>`;
+        li.onclick = () => showReceipt(h.rel);
+        ul.appendChild(li);
+      }
+    }
+
+    async function loadCatalogs() {
+      const data = await api("/api/catalogs");
+      state.catalogsRoot = data.root;
+      const sel = $("catalogSelect");
+      sel.innerHTML = "";
+      const empty = !data.catalogs.length;
+      $("emptyHint").hidden = !empty;
+      if (empty) {
+        $("meta").textContent = `no catalogs under ${data.root} — run collect`;
+        state.catalog = null;
+        renderStatus(null);
+        renderReceipts([], { count: 0, limit: LIST_LIMIT });
+        return data;
+      }
+      for (const c of data.catalogs) {
+        const opt = document.createElement("option");
+        opt.value = c.path;
+        opt.textContent = `${c.name} (${c.files})`;
+        sel.appendChild(opt);
+      }
+      if (!state.catalog || !data.catalogs.some((c) => c.path === state.catalog)) {
+        state.catalog = data.catalogs[0].path;
+      }
+      sel.value = state.catalog;
+      $("meta").textContent = data.root;
+      return data;
+    }
+
+    async function refreshAll() {
+      try {
+        await loadCatalogs();
+        if (!state.catalog) return;
+        const status = await api(`/api/status?catalog=${encodeURIComponent(state.catalog)}`);
+        renderStatus(status);
+        const listed = await api(
+          `/api/list?catalog=${encodeURIComponent(state.catalog)}&limit=${LIST_LIMIT}`
+        );
+        renderReceipts(listed.receipts || [], { count: listed.count, limit: listed.limit });
+      } catch (e) {
+        setMsg(e.message, "err");
+      }
+    }
+
+    async function showReceipt(key) {
+      try {
+        state.activeRel = key;
+        const data = await api(
+          `/api/show?catalog=${encodeURIComponent(state.catalog)}&key=${encodeURIComponent(key)}`
+        );
+        state.lastShow = data;
+        $("inspectEmpty").hidden = true;
+        $("inspectPane").hidden = false;
+        $("inspRel").textContent = data.rel;
+        $("inspMeta").textContent = `${data.sha256?.slice(0, 12) || ""} · ${
+          data.origin_exists ? "origin ok" : "origin missing"
+        } · copy ${data.copy_path ? "ok" : "missing"}`;
+        $("inspChips").innerHTML = [
+          data.syntax_ok ? "syntax ok" : "syntax bad",
+          data.ownership_stripped ? "ownership stripped" : null,
+          data.has_main ? "had __main__" : null,
+        ]
+          .filter(Boolean)
+          .map((t) => `<span class="chip on">${t}</span>`)
+          .join("");
+        $("inspContracts").textContent = JSON.stringify(data.contracts || {}, null, 2);
+        $("inspDeps").textContent = JSON.stringify(data.dependencies || {}, null, 2);
+        $("inspSource").innerHTML = '<span class="meta">Click Source to load shelf copy</span>';
+        [...$("receiptList").children].forEach((li) => {
+          li.classList.toggle(
+            "active",
+            li.querySelector(".rel")?.textContent === data.rel
+          );
+        });
+      } catch (e) {
+        setMsg(e.message, "err");
+      }
+    }
+
+    async function loadSource() {
+      if (!state.activeRel || !state.catalog) return;
+      try {
+        const data = await api(
+          `/api/copy?catalog=${encodeURIComponent(state.catalog)}&key=${encodeURIComponent(state.activeRel)}`
+        );
+        const note = data.truncated ? `\n\n… truncated (${data.chars} chars shown)` : "";
+        $("inspSource").textContent = (data.source || "") + note;
+      } catch (e) {
+        $("inspSource").textContent = "";
+        setMsg(e.message, "err");
+      }
+    }
+
+    $("catalogSelect").onchange = async (e) => {
+      state.catalog = e.target.value;
+      state.activeRel = null;
+      $("inspectEmpty").hidden = false;
+      $("inspectPane").hidden = true;
+      await refreshAll();
+    };
+    $("refreshBtn").onclick = () => refreshAll();
+
+    $("listBtn").onclick = async () => {
+      try {
+        if (!state.catalog) {
+          setMsg("no catalog selected — collect first", "err");
+          return;
+        }
+        const q = $("listQuery").value.trim();
+        const url = `/api/list?catalog=${encodeURIComponent(state.catalog)}&limit=${LIST_LIMIT}${
+          q ? `&query=${encodeURIComponent(q)}` : ""
+        }`;
+        const data = await api(url);
+        renderReceipts(data.receipts || [], { count: data.count, limit: data.limit });
+        setMsg("");
+      } catch (e) {
+        setMsg(e.message, "err");
+      }
+    };
+    $("listQuery").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") $("listBtn").click();
+    });
+
+    $("addVisibleBtn").onclick = () => {
+      for (const r of state.lastList) addSeed(r.rel);
+    };
+
+    $("findBtn").onclick = async () => {
+      try {
+        if (!state.catalog) {
+          setMsg("no catalog selected — collect first", "err");
+          return;
+        }
+        const q = $("findInput").value.trim();
+        if (!q) return;
+        const data = await api(
+          `/api/find?catalog=${encodeURIComponent(state.catalog)}&q=${encodeURIComponent(q)}`
+        );
+        renderFind(data.hits || []);
+        setMsg(`${(data.hits || []).length} hit(s)`, "ok");
+      } catch (e) {
+        setMsg(e.message, "err");
+      }
+    };
+    $("findInput").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") $("findBtn").click();
+    });
+
+    $("addSeedBtn").onclick = () => addSeed(state.activeRel);
+    $("loadSourceBtn").onclick = () => loadSource();
+    $("clearSeedsBtn").onclick = () => {
+      state.seeds = [];
+      renderSeeds();
+      syncCheckboxes();
+      $("actionOut").hidden = true;
+      setMsg("");
+    };
+    $("showRawBtn").onclick = () => {
+      if (!state.lastShow) return;
+      $("actionOut").hidden = false;
+      $("actionOut").textContent = JSON.stringify(state.lastShow, null, 2);
+    };
+
+    $("collectBtn").onclick = async () => {
+      try {
+        const tree = $("collectTree").value.trim();
+        const out = $("collectOut").value.trim();
+        if (!tree || !out) {
+          setCollectMsg("tree and out catalog path required", "err");
+          return;
+        }
+        setCollectMsg("collecting…");
+        const data = await api("/api/collect", {
+          method: "POST",
+          body: JSON.stringify({ tree, out }),
+        });
+        setCollectMsg(
+          `collected ${data.files} file(s) → ${data.catalog}` +
+            (data.skipped ? ` · skipped ${data.skipped}` : ""),
+          "ok"
+        );
+        state.catalog = data.catalog;
+        await refreshAll();
+        if (state.catalog) {
+          const sel = $("catalogSelect");
+          if ([...sel.options].some((o) => o.value === state.catalog)) {
+            sel.value = state.catalog;
+          }
+        }
+      } catch (e) {
+        setCollectMsg(e.message, "err");
+      }
+    };
+
+    $("planBtn").onclick = async () => {
+      try {
+        if (!state.seeds.length) {
+          setMsg("add at least one seed", "err");
+          return;
+        }
+        setMsg("planning…");
+        const data = await api("/api/plan", {
+          method: "POST",
+          body: JSON.stringify({ catalog: state.catalog, seeds: state.seeds }),
+        });
+        $("actionOut").hidden = false;
+        $("actionOut").textContent = JSON.stringify(data, null, 2);
+        const warn =
+          (data.missing_local?.length || 0) + (data.ambiguous_local?.length || 0);
+        setMsg(
+          `plan: ${data.count} units` + (warn ? ` · ${warn} gap(s)` : ""),
+          warn ? "warn" : "ok"
+        );
+      } catch (e) {
+        setMsg(e.message, "err");
+      }
+    };
+
+    $("stackBtn").onclick = async () => {
+      try {
+        const name = $("stackName").value.trim();
+        const out = $("stackOut").value.trim();
+        if (!state.seeds.length) {
+          setMsg("add at least one seed", "err");
+          return;
+        }
+        if (!name || !out) {
+          setMsg("name and out dir required", "err");
+          return;
+        }
+        setMsg("stacking…");
+        const data = await api("/api/stack", {
+          method: "POST",
+          body: JSON.stringify({
+            catalog: state.catalog,
+            seeds: state.seeds,
+            name,
+            out,
+            check: true,
+            force: $("stackForce").checked,
+          }),
+        });
+        $("actionOut").hidden = false;
+        $("actionOut").textContent = JSON.stringify(data, null, 2);
+        const errs = data.compile_errors || [];
+        const ready = data.roster?.ready;
+        let msg = `stacked ${data.compiled_units} units → ${data.project}`;
+        if (ready) msg += " · ready";
+        else if (data.roster) msg += " · not ready";
+        if (errs.length) msg += ` · ${errs.length} compile error(s)`;
+        setMsg(msg, errs.length ? "warn" : ready ? "ok" : "warn");
+      } catch (e) {
+        setMsg(e.message, "err");
+      }
+    };
+
+    (async () => {
+      try {
+        const meta = await api("/api/meta");
+        if (meta.default_catalog) state.catalog = meta.default_catalog;
+        await refreshAll();
+        renderSeeds();
+      } catch (e) {
+        setMsg(e.message, "err");
+        $("emptyHint").hidden = false;
+      }
+    })();
+  </script>
+</body>
+</html>

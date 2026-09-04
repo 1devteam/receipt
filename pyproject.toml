@@ -1,0 +1,29 @@
+[project]
+name = "receipt"
+version = "0.2.0"
+description = "Receipt: collect, strip, and catalog Python receipts; optional compile, produce, and direct."
+requires-python = ">=3.11"
+readme = "README.md"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+receipt = "receipt_cli.cli:main"
+collect = "collector.cli:main"
+compile = "compiler.cli:main"
+produce = "producer.cli:main"
+direct = "director.cli:main"
+pipeline = "pipeline.cli:main"
+insert = "insert.cli:main"
+insertc = "insertc.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["common", "collector", "compiler", "producer", "director", "pipeline", "receipt_cli*", "insert", "insertc"]
+
+[tool.setuptools.package-data]
+receipt_cli = ["dashboard/static/*"]
