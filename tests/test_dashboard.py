@@ -51,8 +51,10 @@ class DashboardTests(unittest.TestCase):
                     html = resp.read().decode("utf-8")
                 self.assertIn("Receipt", html)
                 self.assertIn("stackForce", html)
+                self.assertIn("collectUpdate", html)
                 self.assertIn("/api/copy", html)
                 self.assertIn("/api/collect", html)
+                self.assertIn("/api/sync", html)
 
                 cats = _http_json(f"{base}/api/catalogs")
                 self.assertEqual(len(cats["catalogs"]), 1)

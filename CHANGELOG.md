@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0 — 2026-09-04
+
+### Added
+- GitHub collect resolves and stores the commit SHA (`source.sha`); blob URLs pin to that SHA
+- `receipt sync` re-fetches a GitHub-backed catalog and reports a file diff
+- `collect --update` refreshes an existing catalog in place (same origin)
+- `collect --force` replaces an existing catalog, or switches origin with `--update`
+- Dashboard Collect: update/force flags and Sync for the current GitHub catalog
+
+### Changed
+- Collecting into an existing catalog directory refuses unless `--update` or `--force`
+- Catalog `status` includes `source` metadata
+
 ## 0.3.0 — 2026-09-04
 
 ### Added

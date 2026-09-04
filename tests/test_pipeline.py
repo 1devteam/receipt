@@ -89,6 +89,20 @@ class PipelineTests(unittest.TestCase):
             hits = find_symbol(catalog, "Alpha")
             self.assertEqual(hits[0]["symbol"], "Alpha")
 
+    def test_collect_refuses_existing_catalog(self):
+        fixtures = ROOT / "tests" / "fixtures"
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog = Path(tmp) / "catalog"
+            collect_to(fixtures, catalog)
+            with self.assertRaises(CollectError):
+                collect_to(fixtures, catalog)
+            replaced = collect_to(fixtures, catalog, force=True)
+            self.assertEqual(len(replaced["files"]), 2)
+            refreshed = collect_to(fixtures, catalog, update=True)
+            self.assertEqual(refreshed["diff"]["unchanged"], 2)
+            self.assertEqual(refreshed["diff"]["added"], [])
+            self.assertEqual(refreshed["diff"]["removed"], [])
+
     def test_collect_missing_tree_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             missing = Path(tmp) / "nope"

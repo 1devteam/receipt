@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
             "-o file.json writes receipts only. "
             "tree may be a local path or a GitHub spec "
             "(https://github.com/owner/repo, github:owner/repo@ref, owner/repo). "
+            "Existing catalog: refuse unless --update (refresh) or --force (replace). "
             "Private repos: GITHUB_TOKEN or GH_TOKEN."
         ),
     )
@@ -55,9 +56,25 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="GitHub ref (branch, tag, or SHA). overrides ref in the spec",
     )
+    p.add_argument(
+        "--update",
+        action="store_true",
+        help="refresh an existing catalog in place (same origin)",
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="replace an existing catalog, or switch origin with --update",
+    )
     args = p.parse_args(argv)
     try:
-        data = collect_to(args.tree, Path(args.out), ref=args.ref)
+        data = collect_to(
+            args.tree,
+            Path(args.out),
+            ref=args.ref,
+            update=args.update,
+            force=args.force,
+        )
     except CollectError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -85,5 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     if data.get("source"):
         summary["source"] = data["source"]
         summary["root"] = data.get("root")
+    if data.get("diff"):
+        summary["diff"] = data["diff"]
     print(json.dumps(summary, indent=2))
     return 0 if data["files"] else 2

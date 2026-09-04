@@ -101,6 +101,7 @@ def catalog_summary(catalog: Path) -> dict:
         "name": catalog.name,
         "path": str(catalog.resolve()),
         "root": data.get("root"),
+        "source": data.get("source"),
         "collected_at": data.get("collected_at"),
         "onboard": data.get("onboard"),
         "files": len(files),

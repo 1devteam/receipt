@@ -218,7 +218,18 @@
       <div class="pad stack">
         <input id="collectTree" placeholder="local path or github.com/owner/repo" />
         <input id="collectOut" placeholder="out catalog path" />
-        <button class="primary" id="collectBtn">Collect</button>
+        <label class="check">
+          <input type="checkbox" id="collectUpdate" />
+          Update existing catalog
+        </label>
+        <label class="check">
+          <input type="checkbox" id="collectForce" />
+          Force (replace / switch origin)
+        </label>
+        <div class="row">
+          <button class="primary" id="collectBtn">Collect</button>
+          <button id="syncBtn" title="Re-fetch GitHub source for the current catalog">Sync</button>
+        </div>
         <div class="meta" id="collectMsg"></div>
       </div>
 
@@ -625,15 +636,24 @@
         setCollectMsg("collecting…");
         const data = await api("/api/collect", {
           method: "POST",
-          body: JSON.stringify({ tree, out }),
+          body: JSON.stringify({
+            tree,
+            out,
+            update: $("collectUpdate").checked,
+            force: $("collectForce").checked,
+          }),
         });
         const src = data.source
-          ? ` · ${data.source.kind} ${data.source.owner}/${data.source.repo}@${data.source.ref}`
+          ? ` · ${data.source.kind} ${data.source.owner}/${data.source.repo}@${data.source.sha || data.source.ref}`
+          : "";
+        const diff = data.diff
+          ? ` · +${(data.diff.added || []).length} ~${(data.diff.changed || []).length} -${(data.diff.removed || []).length}`
           : "";
         setCollectMsg(
           `collected ${data.files} file(s) → ${data.catalog}` +
             (data.skipped ? ` · skipped ${data.skipped}` : "") +
-            src,
+            src +
+            diff,
           "ok"
         );
         state.catalog = data.catalog;
@@ -644,6 +664,34 @@
             sel.value = state.catalog;
           }
         }
+      } catch (e) {
+        setCollectMsg(e.message, "err");
+      }
+    };
+
+    $("syncBtn").onclick = async () => {
+      try {
+        if (!state.catalog) {
+          setCollectMsg("no catalog selected — collect first", "err");
+          return;
+        }
+        setCollectMsg("syncing…");
+        const data = await api("/api/sync", {
+          method: "POST",
+          body: JSON.stringify({
+            catalog: state.catalog,
+            force: $("collectForce").checked,
+          }),
+        });
+        const sha = data.source && (data.source.sha || data.source.ref);
+        const diff = data.diff
+          ? ` · +${(data.diff.added || []).length} ~${(data.diff.changed || []).length} -${(data.diff.removed || []).length}`
+          : "";
+        setCollectMsg(
+          `synced ${data.files} file(s) @ ${sha || "?"}${diff}`,
+          "ok"
+        );
+        await refreshAll();
       } catch (e) {
         setCollectMsg(e.message, "err");
       }

@@ -19,6 +19,10 @@ receipt collect https://github.com/owner/repo -o ~/projects/catalogs/repo
 receipt collect github:owner/repo@main:src -o ~/projects/catalogs/repo
 receipt collect owner/repo --ref v1.2.0 -o ~/projects/catalogs/repo
 
+# refresh a GitHub shelf (same origin). existing catalog refuses without --update/--force
+receipt sync -c ~/projects/catalogs/repo
+receipt collect https://github.com/owner/repo -o ~/projects/catalogs/repo --update
+
 # 2. Browse / search
 receipt catalogs
 receipt status -c ~/projects/catalogs/mytree
@@ -62,7 +66,16 @@ Accepted specs:
 
 Private repos and higher API rate limits: set `GITHUB_TOKEN` or `GH_TOKEN`. Receipt does not vendor git.
 
-The catalog records `source` (`kind=github`, owner, repo, ref, url). Each receipt `abs` is the GitHub blob URL. Shelf copies are still the compile source of truth.
+The catalog records `source` (`kind=github`, owner, repo, ref, **sha**, url). Collect resolves the commit SHA and pins blob URLs to that SHA, not the branch name.
+
+Existing catalog directories refuse a second collect unless:
+
+- `--update` — re-fetch the **same** origin, replace changed copies, prune removed ones, report `diff` (`added` / `removed` / `changed` / `unchanged`)
+- `--force` — replace the catalog (or, with `--update`, switch origin)
+
+`receipt sync` re-fetches from the catalog's stored GitHub `source` (optional `--ref` to move the pin). Local catalogs have no GitHub source; use `collect TREE -o CATALOG --update`.
+
+Shelf copies are still the compile source of truth.
 
 ## Onboard model
 

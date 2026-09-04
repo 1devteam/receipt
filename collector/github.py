@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import tarfile
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import BinaryIO
 from urllib.error import HTTPError, URLError
@@ -35,30 +36,33 @@ class GitHubSpec:
     ref: str | None = None
     subpath: str | None = None
     kind: str = "tree"  # tree | blob
+    sha: str | None = None
 
     def repo_url(self) -> str:
         return f"https://github.com/{self.owner}/{self.repo}"
 
+    def pin(self) -> str:
+        return self.sha or self.ref or "HEAD"
+
     def page_url(self) -> str:
         base = self.repo_url()
-        if self.ref and self.subpath:
-            verb = "blob" if self.kind == "blob" else "tree"
-            return f"{base}/{verb}/{self.ref}/{self.subpath}"
-        if self.ref:
-            return f"{base}/tree/{self.ref}"
+        pin = self.pin()
         if self.subpath:
-            return f"{base}/tree/HEAD/{self.subpath}"
+            verb = "blob" if self.kind == "blob" else "tree"
+            return f"{base}/{verb}/{pin}/{self.subpath}"
+        if pin and pin != "HEAD":
+            return f"{base}/tree/{pin}"
         return base
 
     def blob_url(self, rel: str) -> str:
-        ref = self.ref or "HEAD"
+        pin = self.pin()
         if self.kind == "blob" and self.subpath:
             full = self.subpath
         elif self.subpath:
             full = str(PurePosixPath(self.subpath) / rel).lstrip("/")
         else:
             full = rel
-        return f"https://github.com/{self.owner}/{self.repo}/blob/{ref}/{full}"
+        return f"https://github.com/{self.owner}/{self.repo}/blob/{pin}/{full}"
 
     def as_meta(self) -> dict:
         return {
@@ -66,9 +70,18 @@ class GitHubSpec:
             "owner": self.owner,
             "repo": self.repo,
             "ref": self.ref or "HEAD",
+            "sha": self.sha,
             "subpath": self.subpath,
             "url": self.page_url(),
         }
+
+    def spec_string(self) -> str:
+        out = f"github:{self.owner}/{self.repo}"
+        if self.ref:
+            out += f"@{self.ref}"
+        if self.subpath:
+            out += f":{self.subpath}"
+        return out
 
 
 def _token() -> str | None:
@@ -111,13 +124,7 @@ def parse_github(spec: str, *, ref: str | None = None) -> GitHubSpec:
         else:
             parsed = _parse_slug(s, override_ref=ref)
     if ref:
-        parsed = GitHubSpec(
-            owner=parsed.owner,
-            repo=parsed.repo,
-            ref=ref,
-            subpath=parsed.subpath,
-            kind=parsed.kind,
-        )
+        parsed = replace(parsed, ref=ref)
     return parsed
 
 
@@ -192,14 +199,11 @@ def _headers(token: str | None) -> dict[str, str]:
     return headers
 
 
-def _download(url: str, dest: Path, *, token: str | None) -> None:
+def _open(url: str, *, token: str | None):
     req = Request(url, headers=_headers(token))
     try:
-        with urlopen(req, timeout=TIMEOUT_S) as resp:
-            with dest.open("wb") as fh:
-                _copy_stream(resp, fh)
+        return urlopen(req, timeout=TIMEOUT_S)
     except HTTPError as exc:
-        slug = url
         if exc.code in {401, 403}:
             raise GitHubError(
                 "github refused (auth or rate limit). "
@@ -207,9 +211,49 @@ def _download(url: str, dest: Path, *, token: str | None) -> None:
             ) from exc
         if exc.code == 404:
             raise GitHubError(f"github repo or ref not found: {url}") from exc
-        raise GitHubError(f"github http {exc.code}: {slug}") from exc
+        raise GitHubError(f"github http {exc.code}: {url}") from exc
     except URLError as exc:
         raise GitHubError(f"github network error: {exc.reason}") from exc
+
+
+def _get_json(url: str, *, token: str | None) -> dict:
+    with _open(url, token=token) as resp:
+        raw = resp.read()
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise GitHubError(f"github invalid json: {url}") from exc
+    if not isinstance(data, dict):
+        raise GitHubError(f"github unexpected payload: {url}")
+    return data
+
+
+def _download(url: str, dest: Path, *, token: str | None) -> None:
+    with _open(url, token=token) as resp:
+        with dest.open("wb") as fh:
+            _copy_stream(resp, fh)
+
+
+def resolve_github(spec: GitHubSpec, *, token: str | None = None) -> GitHubSpec:
+    """Resolve default branch (if needed) and commit SHA. Tarball fetch uses the SHA."""
+    token = token if token is not None else _token()
+    ref = spec.ref
+    if not ref:
+        repo = _get_json(
+            f"https://api.github.com/repos/{spec.owner}/{spec.repo}",
+            token=token,
+        )
+        ref = repo.get("default_branch") or "HEAD"
+    commit = _get_json(
+        f"https://api.github.com/repos/{spec.owner}/{spec.repo}/commits/{ref}",
+        token=token,
+    )
+    sha = commit.get("sha")
+    if not isinstance(sha, str) or not sha:
+        raise GitHubError(
+            f"github commit missing sha: {spec.owner}/{spec.repo}@{ref}"
+        )
+    return replace(spec, ref=ref, sha=sha)
 
 
 def _copy_stream(src: BinaryIO, dest: BinaryIO) -> None:
@@ -252,7 +296,8 @@ def fetch_github(spec: GitHubSpec, dest: Path, *, token: str | None = None) -> P
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
     token = token if token is not None else _token()
-    ref_part = f"/{spec.ref}" if spec.ref else ""
+    pin = spec.sha or spec.ref
+    ref_part = f"/{pin}" if pin else ""
     url = f"https://api.github.com/repos/{spec.owner}/{spec.repo}/tarball{ref_part}"
     archive = dest / "repo.tar.gz"
     _download(url, archive, token=token)
@@ -277,8 +322,11 @@ def fetch_github(spec: GitHubSpec, dest: Path, *, token: str | None = None) -> P
 def snapshot_github(spec: str | GitHubSpec, *, ref: str | None = None) -> tuple[Path, GitHubSpec, Path]:
     """Parse + fetch into a temp dir. Returns (scan_root, spec, cleanup_dir)."""
     parsed = spec if isinstance(spec, GitHubSpec) else parse_github(str(spec), ref=ref)
+    if ref:
+        parsed = replace(parsed, ref=ref)
     cleanup = Path(tempfile.mkdtemp(prefix="receipt-gh-"))
     try:
+        parsed = resolve_github(parsed)
         root = fetch_github(parsed, cleanup)
     except Exception:
         shutil.rmtree(cleanup, ignore_errors=True)

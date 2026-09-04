@@ -1,6 +1,6 @@
 [project]
 name = "receipt"
-version = "0.3.0"
+version = "0.4.0"
 description = "Receipt: collect, strip, and catalog Python receipts; optional compile, produce, and direct."
 requires-python = ">=3.11"
 readme = "README.md"

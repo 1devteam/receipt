@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from collector.collect import CollectError, collect_to
+from collector.collect import CollectError, collect_to, sync_catalog
 from receipt_cli.shelf import (
     DEFAULT_CATALOGS,
     ShelfError,
@@ -211,7 +211,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 tree_spec = str(tree).strip()
                 out_path = Path(str(out)).expanduser().resolve()
                 ref = str(payload["ref"]).strip() if payload.get("ref") else None
-                data = collect_to(tree_spec, out_path, ref=ref or None)
+                data = collect_to(
+                    tree_spec,
+                    out_path,
+                    ref=ref or None,
+                    update=bool(payload.get("update", False)),
+                    force=bool(payload.get("force", False)),
+                )
                 # Refresh default catalog pointer if we wrote into catalogs root.
                 if out_path.is_dir() and out_path.parent == self.catalogs_root:
                     self.default_catalog_path = out_path
@@ -223,6 +229,28 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         "onboard": data.get("onboard"),
                         "source": data.get("source"),
                         "root": data.get("root"),
+                        "diff": data.get("diff"),
+                    }
+                )
+                self._send(status, body, ctype)
+                return
+
+            if path == "/api/sync":
+                catalog = Path(
+                    payload.get("catalog") or self.default_catalog_path or default_catalog(None)
+                )
+                ref = str(payload["ref"]).strip() if payload.get("ref") else None
+                data = sync_catalog(
+                    catalog, ref=ref or None, force=bool(payload.get("force", False))
+                )
+                status, body, ctype = _json_bytes(
+                    {
+                        "catalog": data.get("catalog") or str(catalog),
+                        "files": len(data.get("files") or []),
+                        "skipped": len(data.get("skipped") or []),
+                        "source": data.get("source"),
+                        "root": data.get("root"),
+                        "diff": data.get("diff"),
                     }
                 )
                 self._send(status, body, ctype)

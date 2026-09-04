@@ -5,9 +5,9 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-from collector.github import GitHubError, is_github_spec, snapshot_github
+from collector.github import GitHubError, GitHubSpec, is_github_spec, snapshot_github
 from collector.onboard import onboard_file, tops_from_rels
-from common.io import write_json
+from common.io import ReceiptIOError, read_json, write_json
 from common.refuse import refused
 
 
@@ -128,13 +128,133 @@ def _index(files: list[dict]) -> dict:
     return symbols
 
 
-def collect_to(root: Path | str, out: Path, *, ref: str | None = None) -> dict:
+def _origin_key(source: dict | None) -> tuple:
+    if not source or not isinstance(source, dict):
+        return ("local",)
+    if source.get("kind") == "github":
+        return (
+            "github",
+            source.get("owner"),
+            source.get("repo"),
+            source.get("subpath") or "",
+        )
+    return (str(source.get("kind") or "unknown"),)
+
+
+def _file_diff(old_files: list[dict], new_files: list[dict]) -> dict:
+    old_by = {f.get("rel"): f.get("sha256") for f in old_files if f.get("rel")}
+    new_by = {f.get("rel"): f.get("sha256") for f in new_files if f.get("rel")}
+    added = sorted(rel for rel in new_by if rel not in old_by)
+    removed = sorted(rel for rel in old_by if rel not in new_by)
+    changed = sorted(rel for rel in new_by if rel in old_by and old_by[rel] != new_by[rel])
+    unchanged = sum(1 for rel in new_by if rel in old_by and old_by[rel] == new_by[rel])
+    return {
+        "added": added,
+        "removed": removed,
+        "changed": changed,
+        "unchanged": unchanged,
+    }
+
+
+def _prune_unreferenced(catalog_dir: Path, files: list[dict]) -> None:
+    keep = {f.get("sha256") for f in files if f.get("sha256")}
+    for sub, glob in (
+        ("copies", "*.py"),
+        ("contracts", "*.json"),
+        ("dependencies", "*.json"),
+    ):
+        folder = catalog_dir / sub
+        if not folder.is_dir():
+            continue
+        for path in folder.glob(glob):
+            if path.stem not in keep:
+                path.unlink(missing_ok=True)
+
+
+def spec_from_source(source: dict) -> str:
+    if not isinstance(source, dict) or source.get("kind") != "github":
+        raise CollectError("catalog has no github source")
+    owner = source.get("owner")
+    repo = source.get("repo")
+    if not owner or not repo:
+        raise CollectError("github source missing owner/repo")
+    spec = GitHubSpec(
+        owner=str(owner),
+        repo=str(repo),
+        ref=source.get("ref") or None,
+        subpath=source.get("subpath") or None,
+        kind="blob" if str(source.get("subpath") or "").endswith(".py") else "tree",
+    )
+    return spec.spec_string()
+
+
+def sync_catalog(
+    catalog: Path,
+    *,
+    ref: str | None = None,
+    force: bool = False,
+) -> dict:
+    """Re-fetch a GitHub-backed catalog and refresh receipts in place."""
+    catalog = Path(catalog).expanduser().resolve()
+    receipts_path = catalog / "receipts.json"
+    if not receipts_path.is_file():
+        raise CollectError(f"not a catalog (need receipts.json): {catalog}")
+    try:
+        previous = read_json(receipts_path)
+    except ReceiptIOError as exc:
+        raise CollectError(str(exc)) from exc
+    if not isinstance(previous, dict):
+        raise CollectError(f"invalid receipts.json: {receipts_path}")
+    spec = spec_from_source(previous.get("source") or {})
+    return collect_to(spec, catalog, ref=ref, update=True, force=force)
+
+
+def collect_to(
+    root: Path | str,
+    out: Path,
+    *,
+    ref: str | None = None,
+    update: bool = False,
+    force: bool = False,
+) -> dict:
     """Write receipts. If out is a directory (or has no .json suffix), write a catalog."""
-    data = collect(root, ref=ref)
     out = Path(out).expanduser().resolve()
     catalog_dir = out if out.suffix != ".json" else out.parent
     receipts_path = out if out.suffix == ".json" else out / "receipts.json"
     catalog_mode = out.suffix != ".json"
+
+    previous: dict | None = None
+    if catalog_mode and receipts_path.is_file():
+        try:
+            loaded = read_json(receipts_path)
+        except ReceiptIOError as exc:
+            raise CollectError(str(exc)) from exc
+        if not isinstance(loaded, dict):
+            raise CollectError(f"invalid receipts.json: {receipts_path}")
+        previous = loaded
+        if not update and not force:
+            raise CollectError(
+                f"catalog exists: {out} (pass --update to refresh or --force to replace)"
+            )
+
+    data = collect(root, ref=ref)
+    if previous is not None and update and not force:
+        old_key = _origin_key(previous.get("source") if isinstance(previous.get("source"), dict) else None)
+        new_key = _origin_key(data.get("source") if isinstance(data.get("source"), dict) else None)
+        if old_key != new_key:
+            raise CollectError(
+                f"catalog origin mismatch: {old_key} -> {new_key} (pass --force to switch origin)"
+            )
+    if previous is not None:
+        data["diff"] = _file_diff(previous.get("files") or [], data.get("files") or [])
+    elif catalog_mode:
+        data["diff"] = {
+            "added": [f["rel"] for f in data.get("files") or [] if f.get("rel")],
+            "removed": [],
+            "changed": [],
+            "unchanged": 0,
+        }
+
     # Remote origins vanish after the snapshot is deleted; keep copies so compile still works.
     persist_copies = catalog_mode or bool(data.get("source"))
 
@@ -160,6 +280,8 @@ def collect_to(root: Path | str, out: Path, *, ref: str | None = None) -> dict:
 
         if catalog_mode:
             write_json(catalog_dir / "index.json", _index(data["files"]))
+        if catalog_mode and previous is not None:
+            _prune_unreferenced(catalog_dir, data["files"])
 
     stored = []
     for rec in data["files"]:

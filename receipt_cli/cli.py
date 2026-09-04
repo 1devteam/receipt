@@ -16,6 +16,7 @@ from receipt_cli.shelf import (
     search_symbols,
     show_receipt,
 )
+from collector.collect import CollectError, sync_catalog
 from receipt_cli.stack import StackError, plan as stack_plan, stack as stack_build
 
 
@@ -40,7 +41,8 @@ def main(argv: list[str] | None = None) -> int:
         epilog=(
             "Shelf commands are first-class. Local UI: receipt dashboard. "
             "Build steps via collect/compile/produce/direct or receipt stack. "
-            "collect TREE may be a local path or a GitHub spec."
+            "collect TREE may be a local path or a GitHub spec. "
+            "receipt sync refreshes a GitHub-backed catalog."
         ),
     )
     p.add_argument("--version", action="version", version=f"receipt {__version__}")
@@ -113,6 +115,22 @@ def main(argv: list[str] | None = None) -> int:
         "--no-open",
         action="store_true",
         help="do not open a browser",
+    )
+
+    p_sync = sub.add_parser(
+        "sync",
+        help="refresh a GitHub-backed catalog (re-fetch, diff, replace changed copies)",
+    )
+    _add_catalog_flag(p_sync)
+    p_sync.add_argument(
+        "--ref",
+        default=None,
+        help="GitHub ref override (branch, tag, or SHA)",
+    )
+    p_sync.add_argument(
+        "--force",
+        action="store_true",
+        help="allow origin switch (not required for same-repo ref updates)",
     )
 
     # Thin delegates so one binary covers the pipeline too.
@@ -191,6 +209,20 @@ def main(argv: list[str] | None = None) -> int:
                 return 3
             return 0
 
+        if args.cmd == "sync":
+            catalog = default_catalog(args.catalog)
+            result = sync_catalog(catalog, ref=args.ref, force=args.force)
+            summary = {
+                "catalog": result.get("catalog") or str(catalog),
+                "files": len(result.get("files") or []),
+                "skipped": len(result.get("skipped") or []),
+                "source": result.get("source"),
+                "root": result.get("root"),
+                "diff": result.get("diff"),
+            }
+            _print(summary)
+            return 0 if result.get("files") else 2
+
         if args.cmd == "dashboard":
             from receipt_cli.dashboard import serve
 
@@ -229,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
 
             return pipeline_main(_remainder(args.args))
 
-    except (ShelfError, StackError) as exc:
+    except (ShelfError, StackError, CollectError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
