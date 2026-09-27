@@ -97,7 +97,6 @@ def _collect_local(root: Path) -> dict:
                 "rel": rel,
                 "abs": str(path),
                 "bytes": len(raw_bytes),
-                # sha256 remains the canonical source-content identity for compatibility.
                 "sha256": source_sha,
                 "source_sha256": source_sha,
                 "normalized_sha256": normalized_sha,
@@ -110,14 +109,11 @@ def _collect_local(root: Path) -> dict:
                 "syntax_error": info["syntax_error"],
                 "has_main": info["has_main"],
                 "ownership_stripped": info["ownership_stripped"],
-                # legacy flat fields (compat for find/index/tests)
                 "classes": info["classes"],
                 "functions": info["functions"],
                 "imports": info["imports"],
-                # lifted sidecars (APIs stay in the normalized .py copy)
                 "contracts": info["contracts"],
                 "dependencies": info["dependencies"],
-                # Transient persistence material; removed from receipts.json below.
                 "raw_bytes": raw_bytes,
                 "stripped": normalized,
             }
@@ -190,8 +186,6 @@ def _prune_unreferenced(catalog_dir: Path, files: list[dict]) -> None:
         "normalized": normalized_keep,
         "contracts": source_keep,
         "dependencies": source_keep,
-        # Legacy copies may exist after an in-place catalog upgrade. Keep only
-        # still-referenced source identities; new receipts no longer point here.
         "copies": source_keep,
     }
     for sub, keep in keep_by_folder.items():
@@ -227,7 +221,6 @@ def sync_catalog(
     ref: str | None = None,
     force: bool = False,
 ) -> dict:
-    """Re-fetch a GitHub-backed catalog and refresh receipts in place."""
     catalog = Path(catalog).expanduser().resolve()
     receipts_path = catalog / "receipts.json"
     if not receipts_path.is_file():
@@ -250,7 +243,6 @@ def collect_to(
     update: bool = False,
     force: bool = False,
 ) -> dict:
-    """Write receipts. If out is a directory (or has no .json suffix), write a catalog."""
     out = Path(out).expanduser().resolve()
     catalog_dir = out if out.suffix != ".json" else out.parent
     receipts_path = out if out.suffix == ".json" else out / "receipts.json"
@@ -288,54 +280,51 @@ def collect_to(
             "unchanged": 0,
         }
 
-    # Remote origins vanish after the snapshot is deleted; persist both exact
-    # source bytes and normalized compile input whenever a durable copy is needed.
-    persist_copies = catalog_mode or bool(data.get("source"))
+    # Provenance persistence is unconditional: both catalog-directory and direct
+    # receipts.json outputs preserve exact raw bytes and normalized compile input.
+    persist_copies = True
 
-    if persist_copies:
-        raw_dir = catalog_dir / "raw"
-        normalized_dir = catalog_dir / "normalized"
-        raw_dir.mkdir(parents=True, exist_ok=True)
-        normalized_dir.mkdir(parents=True, exist_ok=True)
+    raw_dir = catalog_dir / "raw"
+    normalized_dir = catalog_dir / "normalized"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    normalized_dir.mkdir(parents=True, exist_ok=True)
+    if catalog_mode:
+        contracts_dir = catalog_dir / "contracts"
+        deps_dir = catalog_dir / "dependencies"
+        contracts_dir.mkdir(parents=True, exist_ok=True)
+        deps_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        contracts_dir = None
+        deps_dir = None
+
+    for rec in data["files"]:
+        source_sha = rec["source_sha256"]
+        raw_dir.joinpath(f"{source_sha}.py").write_bytes(rec["raw_bytes"])
+        body = rec.get("stripped")
+        normalized_sha = rec.get("normalized_sha256")
+        if body is not None and normalized_sha:
+            (normalized_dir / f"{normalized_sha}.py").write_text(body, encoding="utf-8")
         if catalog_mode:
-            contracts_dir = catalog_dir / "contracts"
-            deps_dir = catalog_dir / "dependencies"
-            contracts_dir.mkdir(parents=True, exist_ok=True)
-            deps_dir.mkdir(parents=True, exist_ok=True)
-        else:
-            contracts_dir = None
-            deps_dir = None
+            write_json(contracts_dir / f"{source_sha}.json", rec.get("contracts") or {})
+            write_json(deps_dir / f"{source_sha}.json", rec.get("dependencies") or {})
 
-        for rec in data["files"]:
-            source_sha = rec["source_sha256"]
-            raw_dir.joinpath(f"{source_sha}.py").write_bytes(rec["raw_bytes"])
-            body = rec.get("stripped")
-            normalized_sha = rec.get("normalized_sha256")
-            if body is not None and normalized_sha:
-                (normalized_dir / f"{normalized_sha}.py").write_text(body, encoding="utf-8")
-            if catalog_mode:
-                write_json(contracts_dir / f"{source_sha}.json", rec.get("contracts") or {})
-                write_json(deps_dir / f"{source_sha}.json", rec.get("dependencies") or {})
-
-        if catalog_mode:
-            write_json(catalog_dir / "index.json", _index(data["files"]))
-        if catalog_mode and previous is not None:
-            _prune_unreferenced(catalog_dir, data["files"])
+    if catalog_mode:
+        write_json(catalog_dir / "index.json", _index(data["files"]))
+    if catalog_mode and previous is not None:
+        _prune_unreferenced(catalog_dir, data["files"])
 
     stored = []
     for rec in data["files"]:
         item = {k: v for k, v in rec.items() if k not in {"stripped", "raw_bytes"}}
-        if persist_copies:
-            source_sha = rec["source_sha256"]
-            item["raw"] = f"raw/{source_sha}.py"
-            normalized_sha = rec.get("normalized_sha256")
-            if rec.get("stripped") is not None and normalized_sha:
-                # `copy` remains the compile-source pointer for backward compatibility.
-                item["copy"] = f"normalized/{normalized_sha}.py"
-                item["normalized"] = item["copy"]
-            if catalog_mode:
-                item["contracts_path"] = f"contracts/{source_sha}.json"
-                item["dependencies_path"] = f"dependencies/{source_sha}.json"
+        source_sha = rec["source_sha256"]
+        item["raw"] = f"raw/{source_sha}.py"
+        normalized_sha = rec.get("normalized_sha256")
+        if rec.get("stripped") is not None and normalized_sha:
+            item["copy"] = f"normalized/{normalized_sha}.py"
+            item["normalized"] = item["copy"]
+        if catalog_mode:
+            item["contracts_path"] = f"contracts/{source_sha}.json"
+            item["dependencies_path"] = f"dependencies/{source_sha}.json"
         stored.append(item)
 
     payload = {**data, "files": stored}
