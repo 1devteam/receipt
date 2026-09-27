@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from common.io import write_json
 from compiler.compile import compile_receipts
@@ -65,19 +65,36 @@ def resolve_seeds(catalog: Path, keys: list[str]) -> list[dict]:
     return selected
 
 
+def _module_candidates(module: str) -> tuple[str, str]:
+    base = module.replace(".", "/")
+    return base + ".py", base + "/__init__.py"
+
+
 def _receipts_for_local_dep(files: list[dict], module: str) -> list[dict]:
     module = module.strip()
     if not module or module == ".":
         return []
-    needle = module.replace(".", "/") + ".py"
-    exact = [f for f in files if f.get("rel") == needle]
+    candidates = _module_candidates(module)
+    exact = [f for f in files if f.get("rel") in candidates]
     if exact:
         return exact
-    ended = [f for f in files if (f.get("rel") or "").endswith("/" + needle)]
+    ended = [
+        f
+        for f in files
+        if any((f.get("rel") or "").endswith("/" + candidate) for candidate in candidates)
+    ]
     if len(ended) == 1:
         return ended
     stem = module.split(".")[-1]
-    by_stem = [f for f in files if Path(f.get("rel") or "").stem == stem]
+    by_stem = [
+        f
+        for f in files
+        if Path(f.get("rel") or "").stem == stem
+        or (
+            Path(f.get("rel") or "").name == "__init__.py"
+            and Path(f.get("rel") or "").parent.name == stem
+        )
+    ]
     if len(by_stem) == 1:
         return by_stem
     if ended:
@@ -85,8 +102,39 @@ def _receipts_for_local_dep(files: list[dict], module: str) -> list[dict]:
     return by_stem
 
 
+def _relative_target(rel: str, module: str) -> str | None:
+    """Resolve a dotted relative import against a receipt path.
+
+    ``.foo`` means sibling ``foo``; ``..foo`` ascends one package level.
+    The returned value is a repository-relative module path without extension.
+    """
+    dots = len(module) - len(module.lstrip("."))
+    if dots <= 0:
+        return None
+    tail = module[dots:]
+    parent = list(PurePosixPath(rel).parent.parts)
+    ascend = dots - 1
+    if ascend > len(parent):
+        return None
+    if ascend:
+        parent = parent[:-ascend]
+    if tail:
+        parent.extend(part for part in tail.split(".") if part)
+    if not parent:
+        return None
+    return "/".join(parent)
+
+
+def _receipts_for_relative_dep(files: list[dict], from_rel: str, module: str) -> list[dict]:
+    target = _relative_target(from_rel, module)
+    if not target:
+        return []
+    candidates = (target + ".py", target + "/__init__.py")
+    return [f for f in files if f.get("rel") in candidates]
+
+
 def close_local_deps(catalog: Path, seeds: list[dict]) -> dict:
-    """Expand selection along extracted local dependency edges only. No invented glue."""
+    """Expand selection along extracted local and relative dependency edges only."""
     data = load_receipts(catalog)
     files = data.get("files") or []
     by_sha = {f.get("sha256"): f for f in files if f.get("sha256")}
@@ -103,35 +151,48 @@ def close_local_deps(catalog: Path, seeds: list[dict]) -> dict:
         selected[sha] = rec
         queue.append(rec)
 
+    def include_or_record(rec: dict, module: str, hits: list[dict], *, kind: str) -> None:
+        if not hits:
+            missing.append({"from": rec.get("rel"), "module": module, "kind": kind})
+            return
+        if len(hits) > 1:
+            already = [h for h in hits if h.get("sha256") in selected]
+            if len(already) == 1:
+                hits = already
+            else:
+                ambiguous.append(
+                    {
+                        "from": rec.get("rel"),
+                        "module": module,
+                        "kind": kind,
+                        "candidates": [h.get("rel") for h in hits],
+                    }
+                )
+                return
+        hit = hits[0]
+        sha = hit.get("sha256")
+        if not sha or sha in selected:
+            return
+        selected[sha] = by_sha.get(sha, hit)
+        queue.append(selected[sha])
+
     while queue:
         rec = queue.pop(0)
         deps = rec.get("dependencies") or {}
         for module in deps.get("local") or []:
-            hits = _receipts_for_local_dep(files, module)
-            if not hits:
-                missing.append({"from": rec.get("rel"), "module": module})
-                continue
-            if len(hits) > 1:
-                # Prefer already selected; else record ambiguous and take none automatically
-                already = [h for h in hits if h.get("sha256") in selected]
-                if len(already) == 1:
-                    hits = already
-                else:
-                    ambiguous.append(
-                        {
-                            "from": rec.get("rel"),
-                            "module": module,
-                            "candidates": [h.get("rel") for h in hits],
-                        }
-                    )
-                    continue
-            hit = hits[0]
-            sha = hit.get("sha256")
-            if not sha or sha in selected:
-                continue
-            # refresh from canonical file list
-            selected[sha] = by_sha.get(sha, hit)
-            queue.append(selected[sha])
+            include_or_record(
+                rec,
+                module,
+                _receipts_for_local_dep(files, module),
+                kind="local",
+            )
+        for module in deps.get("relative") or []:
+            include_or_record(
+                rec,
+                module,
+                _receipts_for_relative_dep(files, rec.get("rel") or "", module),
+                kind="relative",
+            )
 
     units = sorted(selected.values(), key=lambda r: r.get("rel") or "")
     return {
@@ -147,6 +208,7 @@ def close_local_deps(catalog: Path, seeds: list[dict]) -> dict:
                     for c in (u.get("contracts") or {}).get("classes") or u.get("classes") or []
                 ],
                 "local_deps": (u.get("dependencies") or {}).get("local") or [],
+                "relative_deps": (u.get("dependencies") or {}).get("relative") or [],
                 "external_deps": (u.get("dependencies") or {}).get("external") or [],
             }
             for u in units
@@ -162,7 +224,7 @@ def close_local_deps(catalog: Path, seeds: list[dict]) -> dict:
             }
         ),
         "note": (
-            "Closure follows extracted local deps only. "
+            "Closure follows extracted local and relative Python dependency edges only. "
             "Ambiguous/missing locals are reported, not invented."
         ),
     }
