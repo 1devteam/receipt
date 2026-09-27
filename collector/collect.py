@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from collector.github import GitHubError, GitHubSpec, is_github_spec, snapshot_github
-from collector.onboard import onboard_file, tops_from_rels
+from collector.onboard import modules_from_rels, onboard_file, tops_from_rels
 from common.io import ReceiptIOError, read_json, write_json
 from common.refuse import refused
 
@@ -72,11 +72,13 @@ def _collect_local(root: Path) -> dict:
             continue
         kept_paths.append((rel, path))
 
-    tops = tops_from_rels([rel for rel, _ in kept_paths])
+    rels = [rel for rel, _ in kept_paths]
+    tops = tops_from_rels(rels)
+    local_modules = modules_from_rels(rels)
     files: list[dict] = []
 
     for rel, path in kept_paths:
-        info = onboard_file(path, tops=tops)
+        info = onboard_file(path, tops=tops, local_modules=local_modules)
         files.append(
             {
                 "rel": rel,
