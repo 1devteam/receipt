@@ -84,17 +84,23 @@ def main(argv: list[str] | None = None) -> int:
 
     p_stack = sub.add_parser(
         "stack",
-        help="selective restack: plan → compile → produce → direct check",
+        help="selective restack: plan → compile → produce; optional explicit runtime check",
     )
     _add_catalog_flag(p_stack)
     p_stack.add_argument("seeds", nargs="+", help="seed units to include")
     p_stack.add_argument("--name", required=True, help="batch/package name")
     p_stack.add_argument("-o", "--out", required=True, help="output project directory")
     p_stack.add_argument("--work", default=None, help="keep staging dir (default: temp)")
-    p_stack.add_argument(
+    check_group = p_stack.add_mutually_exclusive_group()
+    check_group.add_argument(
+        "--check",
+        action="store_true",
+        help="explicitly import produced modules through Director after build",
+    )
+    check_group.add_argument(
         "--no-check",
         action="store_true",
-        help="skip director check after produce",
+        help=argparse.SUPPRESS,
     )
     p_stack.add_argument(
         "--force",
@@ -196,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
                 name=args.name,
                 out=Path(args.out),
                 work=Path(args.work) if args.work else None,
-                check=not args.no_check,
+                check=bool(args.check and not args.no_check),
                 force=args.force,
             )
             _print(result)

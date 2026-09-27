@@ -89,9 +89,11 @@ class DashboardTests(unittest.TestCase):
                         "seeds": ["alpha.py"],
                         "name": "ui",
                         "out": str(out),
+                        "check": True,
                     },
                 )
                 self.assertEqual(stacked["compiled_units"], 2)
+                self.assertTrue(stacked["execution"]["requested"])
                 self.assertTrue(stacked["roster"]["ready"])
                 self.assertTrue((out / "src" / "i_ui" / "alpha.py").is_file())
 
@@ -181,6 +183,8 @@ class DashboardTests(unittest.TestCase):
                     },
                 )
                 self.assertEqual(forced["compiled_units"], 1)
+                self.assertFalse(forced["execution"]["performed"])
+                self.assertIsNone(forced["roster"])
                 self.assertTrue((out / "src" / "i_gap" / "solo.py").is_file())
             finally:
                 server.shutdown()
