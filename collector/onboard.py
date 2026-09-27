@@ -167,6 +167,17 @@ def modules_from_rels(rels: list[str]) -> set[str]:
     return modules
 
 
+def _normalization_transforms(source: str, info: dict) -> list[str]:
+    if not info.get("syntax_ok"):
+        return []
+    transforms = ["ast_unparse_normalize"]
+    if info.get("has_main"):
+        transforms.append("remove_main_guard")
+    if _had_owner_noise(source):
+        transforms.append("remove_ownership_metadata")
+    return transforms
+
+
 def onboard_source(
     source: str,
     *,
@@ -181,12 +192,14 @@ def onboard_source(
         local_modules=local_modules,
     )
     stripped = strip_for_shelf(source) if info["syntax_ok"] else None
+    owner_noise = _had_owner_noise(source)
     return {
         **info,
         "contracts": contracts,
         "dependencies": dependencies,
         "stripped": stripped,
-        "ownership_stripped": bool(info.get("has_main") or _had_owner_noise(source)),
+        "normalization_transforms": _normalization_transforms(source, info),
+        "ownership_stripped": bool(info.get("has_main") or owner_noise),
     }
 
 

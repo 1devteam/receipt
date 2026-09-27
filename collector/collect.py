@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from collector.github import GitHubError, GitHubSpec, is_github_spec, snapshot_github
-from collector.onboard import modules_from_rels, onboard_file, tops_from_rels
+from collector.onboard import modules_from_rels, onboard_source, tops_from_rels
 from common.io import ReceiptIOError, read_json, write_json
 from common.refuse import refused
 
@@ -21,6 +21,14 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _sha256_text(text: str) -> str:
+    return _sha256_bytes(text.encode("utf-8"))
 
 
 def _candidates(root: Path) -> tuple[Path, list[Path]]:
@@ -78,13 +86,26 @@ def _collect_local(root: Path) -> dict:
     files: list[dict] = []
 
     for rel, path in kept_paths:
-        info = onboard_file(path, tops=tops, local_modules=local_modules)
+        raw_bytes = path.read_bytes()
+        source = raw_bytes.decode("utf-8", errors="replace")
+        info = onboard_source(source, tops=tops, local_modules=local_modules)
+        source_sha = _sha256_bytes(raw_bytes)
+        normalized = info.get("stripped")
+        normalized_sha = _sha256_text(normalized) if normalized is not None else None
         files.append(
             {
                 "rel": rel,
                 "abs": str(path),
-                "bytes": path.stat().st_size,
-                "sha256": _sha256(path),
+                "bytes": len(raw_bytes),
+                # sha256 remains the canonical source-content identity for compatibility.
+                "sha256": source_sha,
+                "source_sha256": source_sha,
+                "normalized_sha256": normalized_sha,
+                "normalization": {
+                    "source_sha256": source_sha,
+                    "normalized_sha256": normalized_sha,
+                    "transforms": list(info.get("normalization_transforms") or []),
+                },
                 "syntax_ok": info["syntax_ok"],
                 "syntax_error": info["syntax_error"],
                 "has_main": info["has_main"],
@@ -93,10 +114,12 @@ def _collect_local(root: Path) -> dict:
                 "classes": info["classes"],
                 "functions": info["functions"],
                 "imports": info["imports"],
-                # lifted sidecars (APIs stay in the .py copy)
+                # lifted sidecars (APIs stay in the normalized .py copy)
                 "contracts": info["contracts"],
                 "dependencies": info["dependencies"],
-                "stripped": info["stripped"],
+                # Transient persistence material; removed from receipts.json below.
+                "raw_bytes": raw_bytes,
+                "stripped": normalized,
             }
         )
 
@@ -104,9 +127,10 @@ def _collect_local(root: Path) -> dict:
         "root": str(base),
         "collected_at": datetime.now(timezone.utc).isoformat(),
         "onboard": {
-            "strip": ["__main__", "ownership_stamps", "ownership_headers"],
+            "preserve": ["raw_source"],
+            "normalize": ["ast_unparse", "remove_main_guard", "remove_ownership_metadata"],
             "extract": ["contracts", "dependencies"],
-            "keep_in_source": ["apis", "imports"],
+            "keep_in_normalized_source": ["apis", "imports"],
         },
         "files": files,
         "skipped": skipped,
@@ -159,15 +183,22 @@ def _file_diff(old_files: list[dict], new_files: list[dict]) -> dict:
 
 
 def _prune_unreferenced(catalog_dir: Path, files: list[dict]) -> None:
-    keep = {f.get("sha256") for f in files if f.get("sha256")}
-    for sub, glob in (
-        ("copies", "*.py"),
-        ("contracts", "*.json"),
-        ("dependencies", "*.json"),
-    ):
+    source_keep = {f.get("source_sha256") or f.get("sha256") for f in files}
+    normalized_keep = {f.get("normalized_sha256") for f in files if f.get("normalized_sha256")}
+    keep_by_folder = {
+        "raw": source_keep,
+        "normalized": normalized_keep,
+        "contracts": source_keep,
+        "dependencies": source_keep,
+        # Legacy copies may exist after an in-place catalog upgrade. Keep only
+        # still-referenced source identities; new receipts no longer point here.
+        "copies": source_keep,
+    }
+    for sub, keep in keep_by_folder.items():
         folder = catalog_dir / sub
         if not folder.is_dir():
             continue
+        glob = "*.json" if sub in {"contracts", "dependencies"} else "*.py"
         for path in folder.glob(glob):
             if path.stem not in keep:
                 path.unlink(missing_ok=True)
@@ -257,12 +288,15 @@ def collect_to(
             "unchanged": 0,
         }
 
-    # Remote origins vanish after the snapshot is deleted; keep copies so compile still works.
+    # Remote origins vanish after the snapshot is deleted; persist both exact
+    # source bytes and normalized compile input whenever a durable copy is needed.
     persist_copies = catalog_mode or bool(data.get("source"))
 
     if persist_copies:
-        copies = catalog_dir / "copies"
-        copies.mkdir(parents=True, exist_ok=True)
+        raw_dir = catalog_dir / "raw"
+        normalized_dir = catalog_dir / "normalized"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        normalized_dir.mkdir(parents=True, exist_ok=True)
         if catalog_mode:
             contracts_dir = catalog_dir / "contracts"
             deps_dir = catalog_dir / "dependencies"
@@ -273,12 +307,15 @@ def collect_to(
             deps_dir = None
 
         for rec in data["files"]:
+            source_sha = rec["source_sha256"]
+            raw_dir.joinpath(f"{source_sha}.py").write_bytes(rec["raw_bytes"])
             body = rec.get("stripped")
-            if body is not None:
-                (copies / f"{rec['sha256']}.py").write_text(body, encoding="utf-8")
+            normalized_sha = rec.get("normalized_sha256")
+            if body is not None and normalized_sha:
+                (normalized_dir / f"{normalized_sha}.py").write_text(body, encoding="utf-8")
             if catalog_mode:
-                write_json(contracts_dir / f"{rec['sha256']}.json", rec.get("contracts") or {})
-                write_json(deps_dir / f"{rec['sha256']}.json", rec.get("dependencies") or {})
+                write_json(contracts_dir / f"{source_sha}.json", rec.get("contracts") or {})
+                write_json(deps_dir / f"{source_sha}.json", rec.get("dependencies") or {})
 
         if catalog_mode:
             write_json(catalog_dir / "index.json", _index(data["files"]))
@@ -287,13 +324,18 @@ def collect_to(
 
     stored = []
     for rec in data["files"]:
-        item = {k: v for k, v in rec.items() if k != "stripped"}
-        if persist_copies and rec.get("stripped") is not None:
-            sha = rec["sha256"]
-            item["copy"] = f"copies/{sha}.py"
+        item = {k: v for k, v in rec.items() if k not in {"stripped", "raw_bytes"}}
+        if persist_copies:
+            source_sha = rec["source_sha256"]
+            item["raw"] = f"raw/{source_sha}.py"
+            normalized_sha = rec.get("normalized_sha256")
+            if rec.get("stripped") is not None and normalized_sha:
+                # `copy` remains the compile-source pointer for backward compatibility.
+                item["copy"] = f"normalized/{normalized_sha}.py"
+                item["normalized"] = item["copy"]
             if catalog_mode:
-                item["contracts_path"] = f"contracts/{sha}.json"
-                item["dependencies_path"] = f"dependencies/{sha}.json"
+                item["contracts_path"] = f"contracts/{source_sha}.json"
+                item["dependencies_path"] = f"dependencies/{source_sha}.json"
         stored.append(item)
 
     payload = {**data, "files": stored}

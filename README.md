@@ -1,6 +1,6 @@
 # Receipt
 
-Collect, strip, and catalog `.py` receipts onto a **shelf**. Browse and search them. Selectively restack a closed local-dep subset into an installable project.
+Collect, preserve, normalize, and catalog `.py` receipts onto a **shelf**. Browse and search them. Selectively restack a closed Python dependency subset into an installable project.
 
 Product CLI: **`receipt`**  
 Pipeline tools: `collect` · `compile` · `produce` · `direct` · `pipeline`  
@@ -30,14 +30,14 @@ receipt list   -c ~/projects/catalogs/mytree -q Core
 receipt find   ping -c ~/projects/catalogs/mytree
 receipt show   CoreStatus.py -c ~/projects/catalogs/mytree
 
-# 3. Plan local-dep closure, then stack
+# 3. Plan dependency closure, then stack
 receipt plan  CoreStatus.py -c ~/projects/catalogs/mytree
 receipt stack CoreStatus.py --name spine -o ~/projects/compiled/spine
 
 # Gaps (missing/ambiguous local deps) refuse stack unless --force
 receipt stack Seed.py --name partial -o /tmp/partial --force
 
-# 4. Dashboard (browse, inspect source, collect, plan, stack)
+# 4. Dashboard (browse, inspect normalized source, collect, plan, stack)
 receipt dashboard
 # http://127.0.0.1:8787/
 ```
@@ -51,7 +51,7 @@ If there is no catalog yet, create one with `receipt collect` (or the Collect fo
 
 ## GitHub source
 
-`collect` TREE may be a local path **or** a GitHub spec. Receipt downloads a snapshot tarball, then onboard/strip/catalog as usual.
+`collect` TREE may be a local path **or** a GitHub spec. Receipt downloads a snapshot tarball, then onboard/catalogs it.
 
 Accepted specs:
 
@@ -70,37 +70,46 @@ The catalog records `source` (`kind=github`, owner, repo, ref, **sha**, url). Co
 
 Existing catalog directories refuse a second collect unless:
 
-- `--update` — re-fetch the **same** origin, replace changed copies, prune removed ones, report `diff` (`added` / `removed` / `changed` / `unchanged`)
+- `--update` — re-fetch the **same** origin, replace changed receipts, prune removed ones, report `diff` (`added` / `removed` / `changed` / `unchanged`)
 - `--force` — replace the catalog (or, with `--update`, switch origin)
 
 `receipt sync` re-fetches from the catalog's stored GitHub `source` (optional `--ref` to move the pin). Local catalogs have no GitHub source; use `collect TREE -o CATALOG --update`.
 
-Shelf copies are still the compile source of truth.
+The normalized shelf copy is the compile source of truth. The exact original bytes are preserved separately as provenance evidence.
 
-## Onboard model
+## Onboard and provenance model
 
 When a `.py` is collected onto the shelf:
 
 | Action | What happens |
 |---|---|
-| **Strip from shelf copy** | `__main__` launchers, ownership stamps (`INSERT_*` / `RECEIPT_*`), ownership headers |
-| **Extract to sidecars** | **contracts** (classes/methods/functions) and **dependencies** (local / external / relative / stdlib) |
-| **Keep in the `.py`** | APIs and imports — contracts are not deleted from source |
+| **Preserve raw source** | Exact original bytes are stored under `raw/` and keyed by `source_sha256`. |
+| **Normalize compile source** | Python is parsed/unparsed; `__main__` launchers and Receipt/Insert ownership metadata are removed when present. |
+| **Record transforms** | Each receipt records `source_sha256`, `normalized_sha256`, and the exact normalization transform names applied. |
+| **Extract to sidecars** | **contracts** (classes/methods/functions) and **dependencies** (local / external / relative / stdlib). |
+| **Keep in normalized `.py`** | APIs and imports remain in the compile source; contracts are not deleted from source. |
+
+`sha256` remains an alias for the original source-content SHA-256 for compatibility. `copy` points at the normalized compile source.
 
 Catalog layout:
 
-```
+```text
 catalog/
   receipts.json
   index.json
-  copies/<sha>.py
-  contracts/<sha>.json
-  dependencies/<sha>.json
+  raw/<source-sha>.py
+  normalized/<normalized-sha>.py
+  contracts/<source-sha>.json
+  dependencies/<source-sha>.json
 ```
+
+This split is intentional: raw source proves exactly what Receipt collected; normalized source proves exactly what Receipt compiles.
 
 ## Plan / stack
 
-- **`receipt plan`** — resolve seed units and close along *extracted* local dependency edges only. Reports `missing_local` / `ambiguous_local`; does not invent glue.
+- **`receipt plan`** — resolve seed units and close along extracted absolute-local and relative Python dependency edges. Reports `missing_local` / `ambiguous_local`; does not invent glue.
+- Nested imports participate in dependency discovery.
+- Conventional `src/` and `lib/` source roots are recognized when classifying absolute imports.
 - **`receipt stack`** — plan → compile → produce → director check. Refuses unresolved local deps unless `--force`.
 - Produced projects include an installable `pyproject.toml` (`build-system` + `packages.find` where `src`).
 
@@ -109,10 +118,12 @@ catalog/
 `receipt dashboard` serves a local shelf UI:
 
 - Catalog picker, status, symbol find, receipt list with multi-select
-- Inspect contracts/deps and shelf **source** preview (`/api/copy`)
+- Inspect contracts/deps and normalized shelf **source** preview (`/api/copy`)
 - Collect form (`/api/collect`) then refresh catalogs
 - Plan / stack with optional **force**
 - Surfaces plan gaps and `compile_errors`
+
+The dashboard is a local developer interface. Do not expose it as a public service without an execution sandbox and a stricter filesystem boundary.
 
 ## Pipeline tools
 
@@ -143,10 +154,10 @@ Same steps are also available as `receipt collect|compile|produce|direct|pipelin
 
 - **Source-to-source.** No binary. Stack = Python package + maps.
 - Broken Python fails that unit at compile; recorded in `errors` / `compile_errors`.
-- External libs are named, not vendored. Producer writes `requirements.txt`.
+- External imports are observed module names, not proven Python distribution names. Producer currently writes those roots to `requirements.txt` as a best-effort manifest.
 - Side effects on import still happen; director isolates imports in subprocesses.
 - The pipeline does not invent glue between files that never imported each other.
-- Relative imports (`from .foo import bar`) are left untouched and recorded as compile warnings.
+- Relative imports are preserved in compiled source after their dependency edges participate in planning.
 
 ## Exit codes
 
@@ -159,10 +170,10 @@ Same steps are also available as `receipt collect|compile|produce|direct|pipelin
 
 ## Layout
 
-```
+```text
 receipt/
   receipt_cli/   # product CLI + shelf + stack + dashboard
-  collector/     # scan, strip, catalog, find
+  collector/     # scan, preserve, normalize, catalog, find
   compiler/      # owned-module rewrite
   producer/      # project printer
   director/      # check + call
