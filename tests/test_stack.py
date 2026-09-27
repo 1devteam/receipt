@@ -56,6 +56,107 @@ class StackTests(unittest.TestCase):
                 0,
             )
 
+    def test_plan_closes_relative_imports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            tree = tmp_path / "tree"
+            pkg = tree / "pkg"
+            pkg.mkdir(parents=True)
+            (pkg / "__init__.py").write_text("", encoding="utf-8")
+            (pkg / "b.py").write_text("VALUE = 7\n", encoding="utf-8")
+            (pkg / "a.py").write_text(
+                "from .b import VALUE\n\ndef read():\n    return VALUE\n",
+                encoding="utf-8",
+            )
+            catalog = tmp_path / "catalog"
+            collect_to(tree, catalog)
+
+            planned = plan(catalog, ["pkg/a.py"])
+            rels = {u["rel"] for u in planned["units"]}
+            self.assertEqual(rels, {"pkg/a.py", "pkg/b.py"})
+            self.assertFalse(planned["missing_local"])
+            self.assertIn(".b", next(u for u in planned["units"] if u["rel"] == "pkg/a.py")["relative_deps"])
+
+            out = tmp_path / "project"
+            result = stack(catalog, ["pkg/a.py"], name="relative", out=out)
+            self.assertEqual(result["compiled_units"], 2)
+            self.assertTrue(result["roster"]["ready"])
+
+    def test_from_dot_import_module_closes_relative_module(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            tree = tmp_path / "tree"
+            pkg = tree / "pkg"
+            pkg.mkdir(parents=True)
+            (pkg / "__init__.py").write_text("", encoding="utf-8")
+            (pkg / "helper.py").write_text("VALUE = 3\n", encoding="utf-8")
+            (pkg / "main.py").write_text(
+                "from . import helper\n\ndef run():\n    return helper.VALUE\n",
+                encoding="utf-8",
+            )
+            catalog = tmp_path / "catalog"
+            data = collect_to(tree, catalog)
+            main = next(f for f in data["files"] if f["rel"] == "pkg/main.py")
+            self.assertIn(".helper", main["dependencies"]["relative"])
+
+            planned = plan(catalog, ["pkg/main.py"])
+            self.assertEqual(
+                {u["rel"] for u in planned["units"]},
+                {"pkg/helper.py", "pkg/main.py"},
+            )
+
+    def test_nested_imports_participate_in_closure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            tree = tmp_path / "tree"
+            tree.mkdir()
+            (tree / "helper.py").write_text("VALUE = 11\n", encoding="utf-8")
+            (tree / "main.py").write_text(
+                "def run():\n    import helper\n    return helper.VALUE\n",
+                encoding="utf-8",
+            )
+            catalog = tmp_path / "catalog"
+            data = collect_to(tree, catalog)
+            main = next(f for f in data["files"] if f["rel"] == "main.py")
+            self.assertIn("helper", main["dependencies"]["local"])
+
+            planned = plan(catalog, ["main.py"])
+            self.assertEqual(
+                {u["rel"] for u in planned["units"]},
+                {"helper.py", "main.py"},
+            )
+
+    def test_src_layout_absolute_import_is_local_and_stackable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            tree = tmp_path / "tree"
+            pkg = tree / "src" / "acme"
+            pkg.mkdir(parents=True)
+            (pkg / "__init__.py").write_text("", encoding="utf-8")
+            (pkg / "model.py").write_text(
+                "class Model:\n    pass\n",
+                encoding="utf-8",
+            )
+            (pkg / "service.py").write_text(
+                "from acme.model import Model\n\ndef build():\n    return Model()\n",
+                encoding="utf-8",
+            )
+            catalog = tmp_path / "catalog"
+            data = collect_to(tree, catalog)
+            service = next(f for f in data["files"] if f["rel"] == "src/acme/service.py")
+            self.assertIn("acme.model", service["dependencies"]["local"])
+            self.assertNotIn("acme.model", service["dependencies"]["external"])
+
+            planned = plan(catalog, ["src/acme/service.py"])
+            self.assertEqual(
+                {u["rel"] for u in planned["units"]},
+                {"src/acme/model.py", "src/acme/service.py"},
+            )
+
+            out = tmp_path / "project"
+            result = stack(catalog, ["src/acme/service.py"], name="src_layout", out=out)
+            self.assertTrue(result["roster"]["ready"])
+
     def test_ambiguous_seed_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
