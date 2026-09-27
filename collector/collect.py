@@ -9,6 +9,7 @@ from collector.github import GitHubError, GitHubSpec, is_github_spec, snapshot_g
 from collector.onboard import modules_from_rels, onboard_source, tops_from_rels
 from common.io import ReceiptIOError, read_json, write_json
 from common.refuse import refused
+from common.source_identity import bridge_payload, build_source_identity
 
 
 class CollectError(ValueError):
@@ -39,6 +40,21 @@ def _candidates(root: Path) -> tuple[Path, list[Path]]:
     return root, sorted(root.rglob("*.py"))
 
 
+def _attach_source_identities(data: dict) -> None:
+    """Attach stable Receipt↔evidence identities without importing graph semantics."""
+    source = data.get("source") if isinstance(data.get("source"), dict) else None
+    for rec in data.get("files") or []:
+        identity = build_source_identity(
+            rel=rec.get("rel") or "",
+            source_sha256=rec.get("source_sha256") or rec.get("sha256") or "",
+            source=source,
+            origin=rec.get("abs"),
+        )
+        rec["source_identity"] = identity
+        rec["graft_refs"] = list(rec.get("graft_refs") or [])
+        rec["evidence_bridge"] = bridge_payload(identity, rec["graft_refs"])
+
+
 def collect(root: Path | str, *, ref: str | None = None) -> dict:
     spec = str(root).strip()
     if is_github_spec(spec):
@@ -50,6 +66,7 @@ def collect(root: Path | str, *, ref: str | None = None) -> dict:
             data["root"] = gh.page_url()
             for rec in data["files"]:
                 rec["abs"] = gh.blob_url(rec["rel"])
+            _attach_source_identities(data)
             return data
         except GitHubError as exc:
             raise CollectError(str(exc)) from exc
@@ -60,7 +77,9 @@ def collect(root: Path | str, *, ref: str | None = None) -> dict:
     path = Path(spec).expanduser()
     if not path.exists():
         raise CollectError(f"tree does not exist: {path}")
-    return _collect_local(path.resolve())
+    data = _collect_local(path.resolve())
+    _attach_source_identities(data)
+    return data
 
 
 def _collect_local(root: Path) -> dict:
