@@ -35,6 +35,17 @@ class DropMain(ast.NodeTransformer):
         return self.generic_visit(node)
 
 
+def _import_from_names(node: ast.ImportFrom) -> list[str]:
+    """Return import dependency names while preserving relative-import depth."""
+    prefix = "." * int(node.level or 0)
+    if node.module:
+        return [prefix + node.module]
+    if node.level:
+        names = [prefix + alias.name for alias in node.names if alias.name != "*"]
+        return names or [prefix]
+    return []
+
+
 def inspect_source(source: str) -> dict:
     try:
         tree = ast.parse(source)
@@ -51,8 +62,9 @@ def inspect_source(source: str) -> dict:
     has_main = False
     classes: list[dict] = []
     functions: list[dict] = []
-    imports: list[str] = []
 
+    # Contracts remain intentionally module-level. Nested functions/classes are
+    # implementation details, not public receipt entry points.
     for node in tree.body:
         if isinstance(node, ast.If) and _is_main_guard(node):
             has_main = True
@@ -67,11 +79,16 @@ def inspect_source(source: str) -> dict:
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if not node.name.startswith("_"):
                 functions.append({"name": node.name, "params": _params(node.args)})
-        elif isinstance(node, ast.Import):
+
+    # Dependency discovery is deliberately recursive. Imports inside functions,
+    # TYPE_CHECKING blocks, conditionals, and try/except fallbacks still affect
+    # the source unit's potential runtime/type-checking closure.
+    imports: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
             imports.extend(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            mod = node.module or ""
-            imports.append(mod if mod else ".")
+            imports.extend(_import_from_names(node))
 
     return {
         "syntax_ok": True,
