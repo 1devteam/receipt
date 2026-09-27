@@ -1,4 +1,4 @@
-"""Selective restack: pick shelf units, close local deps, compile → produce → check."""
+"""Selective restack: pick shelf units, close deps, compile, produce; check only on opt-in."""
 
 from __future__ import annotations
 
@@ -260,9 +260,10 @@ def stack(
     name: str,
     out: Path,
     work: Path | None = None,
-    check: bool = True,
+    check: bool = False,
     force: bool = False,
 ) -> dict:
+    """Build a selected stack; importing produced code requires ``check=True``."""
     plan_data = plan(catalog, keys)
     if plan_data["count"] == 0:
         raise StackError("selection is empty")
@@ -304,6 +305,11 @@ def stack(
             "package": meta.get("package"),
             "compiled_units": len(meta.get("units") or []),
             "compile_errors": meta.get("errors") or [],
+            "execution": {
+                "requested": bool(check),
+                "performed": roster is not None,
+                "boundary": "explicit",
+            },
             "roster": (
                 {
                     "ready": roster.get("ready"),

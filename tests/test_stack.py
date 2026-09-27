@@ -29,13 +29,15 @@ class StackTests(unittest.TestCase):
             self.assertFalse(result["missing_local"])
             self.assertFalse(result["ambiguous_local"])
 
-    def test_stack_builds_runnable_subset(self):
+    def test_stack_builds_runnable_subset_when_check_explicit(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             catalog = self._catalog(tmp_path)
             out = tmp_path / "project"
-            result = stack(catalog, ["Alpha"], name="demo", out=out)
+            result = stack(catalog, ["Alpha"], name="demo", out=out, check=True)
             self.assertEqual(result["compiled_units"], 2)
+            self.assertTrue(result["execution"]["requested"])
+            self.assertTrue(result["execution"]["performed"])
             self.assertTrue(result["roster"]["ready"])
             self.assertTrue((out / "src" / "i_demo" / "alpha.py").is_file())
             self.assertTrue((out / "src" / "i_demo" / "beta.py").is_file())
@@ -55,6 +57,35 @@ class StackTests(unittest.TestCase):
                 ),
                 0,
             )
+
+    def test_stack_default_build_does_not_import_produced_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            tree = tmp_path / "tree"
+            tree.mkdir()
+            (tree / "boom.py").write_text(
+                "raise RuntimeError('import side effect')\n\ndef marker():\n    return 1\n",
+                encoding="utf-8",
+            )
+            catalog = tmp_path / "catalog"
+            collect_to(tree, catalog)
+
+            built = stack(catalog, ["boom.py"], name="safe_build", out=tmp_path / "built")
+            self.assertIsNone(built["roster"])
+            self.assertFalse(built["execution"]["requested"])
+            self.assertFalse(built["execution"]["performed"])
+            self.assertTrue((tmp_path / "built" / "src" / "i_safe_build" / "boom.py").is_file())
+
+            checked = stack(
+                catalog,
+                ["boom.py"],
+                name="checked",
+                out=tmp_path / "checked",
+                check=True,
+            )
+            self.assertTrue(checked["execution"]["performed"])
+            self.assertFalse(checked["roster"]["ready"])
+            self.assertEqual(checked["roster"]["import_error"], 1)
 
     def test_plan_closes_relative_imports(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -78,7 +109,7 @@ class StackTests(unittest.TestCase):
             self.assertIn(".b", next(u for u in planned["units"] if u["rel"] == "pkg/a.py")["relative_deps"])
 
             out = tmp_path / "project"
-            result = stack(catalog, ["pkg/a.py"], name="relative", out=out)
+            result = stack(catalog, ["pkg/a.py"], name="relative", out=out, check=True)
             self.assertEqual(result["compiled_units"], 2)
             self.assertTrue(result["roster"]["ready"])
 
@@ -154,7 +185,13 @@ class StackTests(unittest.TestCase):
             )
 
             out = tmp_path / "project"
-            result = stack(catalog, ["src/acme/service.py"], name="src_layout", out=out)
+            result = stack(
+                catalog,
+                ["src/acme/service.py"],
+                name="src_layout",
+                out=out,
+                check=True,
+            )
             self.assertTrue(result["roster"]["ready"])
 
     def test_ambiguous_seed_fails(self):

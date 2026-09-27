@@ -196,7 +196,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     list(seeds),
                     name=str(name),
                     out=Path(out).expanduser(),
-                    check=bool(payload.get("check", True)),
+                    check=bool(payload.get("check", False)),
                     force=bool(payload.get("force", False)),
                 )
                 status, body, ctype = _json_bytes(result)
