@@ -69,8 +69,16 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue((catalog / "receipts.json").is_file())
             self.assertTrue((catalog / "index.json").is_file())
             alpha = next(f for f in data["files"] if f["rel"] == "alpha.py")
+            raw = catalog / alpha["raw"]
             copy = catalog / alpha["copy"]
+            self.assertTrue(raw.is_file())
             self.assertTrue(copy.is_file())
+            self.assertEqual(raw.read_bytes(), (fixtures / "alpha.py").read_bytes())
+            self.assertEqual(alpha["source_sha256"], alpha["sha256"])
+            self.assertEqual(alpha["normalization"]["source_sha256"], alpha["source_sha256"])
+            self.assertEqual(alpha["normalization"]["normalized_sha256"], alpha["normalized_sha256"])
+            self.assertIn("ast_unparse_normalize", alpha["normalization"]["transforms"])
+            self.assertIn("remove_main_guard", alpha["normalization"]["transforms"])
             text = copy.read_text()
             self.assertNotIn("__main__", text)
             self.assertIn("class Alpha", text)
@@ -88,6 +96,26 @@ class PipelineTests(unittest.TestCase):
 
             hits = find_symbol(catalog, "Alpha")
             self.assertEqual(hits[0]["symbol"], "Alpha")
+
+    def test_raw_source_preserves_comments_while_normalized_copy_is_explicit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            tree = tmp_path / "tree"
+            tree.mkdir()
+            original = "# important operator note\n\ndef run( x ):\n    return x + 1\n"
+            (tree / "unit.py").write_text(original, encoding="utf-8")
+            catalog = tmp_path / "catalog"
+            data = collect_to(tree, catalog)
+            unit = data["files"][0]
+
+            raw = (catalog / unit["raw"]).read_text(encoding="utf-8")
+            normalized = (catalog / unit["normalized"]).read_text(encoding="utf-8")
+            self.assertEqual(raw, original)
+            self.assertIn("# important operator note", raw)
+            self.assertNotIn("# important operator note", normalized)
+            self.assertNotEqual(unit["source_sha256"], unit["normalized_sha256"])
+            self.assertEqual(unit["copy"], unit["normalized"])
+            self.assertEqual(unit["normalization"]["transforms"], ["ast_unparse_normalize"])
 
     def test_collect_refuses_existing_catalog(self):
         fixtures = ROOT / "tests" / "fixtures"
@@ -140,6 +168,7 @@ class PipelineTests(unittest.TestCase):
             self.assertIn("class Unit", copy)
             self.assertIn("from helper import poke", copy)
             self.assertTrue(unit["ownership_stripped"])
+            self.assertIn("remove_ownership_metadata", unit["normalization"]["transforms"])
             self.assertEqual(unit["contracts"]["classes"][0]["name"], "Unit")
             self.assertIn("helper", unit["dependencies"]["local"])
 
