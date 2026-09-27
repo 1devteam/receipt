@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from collector.inspect import DropMain, inspect_source
 
@@ -25,6 +25,8 @@ HEADER_PREFIXES = (
     "# origin:",
     "# id:",
 )
+
+COMMON_SOURCE_ROOTS = {"src", "lib"}
 
 
 class DropOwnerStamps(ast.NodeTransformer):
@@ -92,20 +94,36 @@ def extract_contracts(info: dict) -> dict:
     }
 
 
-def extract_dependencies(imports: list[str], tops: set[str]) -> dict:
+def _is_local_absolute(module: str, local_modules: set[str]) -> bool:
+    if not module:
+        return False
+    return any(
+        known == module
+        or known.startswith(module + ".")
+        or module.startswith(known + ".")
+        for known in local_modules
+    )
+
+
+def extract_dependencies(
+    imports: list[str],
+    tops: set[str],
+    local_modules: set[str] | None = None,
+) -> dict:
     """Classify imports. Code keeps imports; this is the sidecar map."""
     std = set(sys.stdlib_module_names)
     local: set[str] = set()
     external: set[str] = set()
     relative: set[str] = set()
     stdlib: set[str] = set()
+    known_modules = local_modules or set()
 
     for raw in imports or []:
         if not raw or raw == "." or raw.startswith("."):
             relative.add(raw or ".")
             continue
         root = raw.split(".", 1)[0]
-        if root in tops:
+        if root in tops or _is_local_absolute(raw, known_modules):
             local.add(raw)
         elif root in std or root.startswith("_"):
             stdlib.add(root)
@@ -128,10 +146,40 @@ def tops_from_rels(rels: list[str]) -> set[str]:
     return tops
 
 
-def onboard_source(source: str, *, tops: set[str]) -> dict:
+def modules_from_rels(rels: list[str]) -> set[str]:
+    """Return plausible importable module names for collected Python paths.
+
+    Preserve the literal repository-relative module path, while also recognizing
+    conventional source containers such as ``src/`` and ``lib/`` as layout
+    directories rather than import-package names.
+    """
+    modules: set[str] = set()
+    for rel in rels:
+        parts = list(PurePosixPath(rel).parts)
+        if not parts or not parts[-1].endswith(".py"):
+            continue
+        stem = Path(parts[-1]).stem
+        module_parts = parts[:-1] if stem == "__init__" else [*parts[:-1], stem]
+        if module_parts:
+            modules.add(".".join(module_parts))
+        if module_parts and module_parts[0] in COMMON_SOURCE_ROOTS and len(module_parts) > 1:
+            modules.add(".".join(module_parts[1:]))
+    return modules
+
+
+def onboard_source(
+    source: str,
+    *,
+    tops: set[str],
+    local_modules: set[str] | None = None,
+) -> dict:
     info = inspect_source(source)
     contracts = extract_contracts(info)
-    dependencies = extract_dependencies(info.get("imports") or [], tops)
+    dependencies = extract_dependencies(
+        info.get("imports") or [],
+        tops,
+        local_modules=local_modules,
+    )
     stripped = strip_for_shelf(source) if info["syntax_ok"] else None
     return {
         **info,
@@ -142,6 +190,11 @@ def onboard_source(source: str, *, tops: set[str]) -> dict:
     }
 
 
-def onboard_file(path: Path, *, tops: set[str]) -> dict:
+def onboard_file(
+    path: Path,
+    *,
+    tops: set[str],
+    local_modules: set[str] | None = None,
+) -> dict:
     source = path.read_text(encoding="utf-8", errors="replace")
-    return onboard_source(source, tops=tops)
+    return onboard_source(source, tops=tops, local_modules=local_modules)
