@@ -117,6 +117,24 @@ def _edge_key(edge: dict[str, Any]) -> tuple[str, str, str, str]:
     )
 
 
+def _module_targets(module_index: dict[str, set[str]], resolved_name: str) -> set[str]:
+    """Resolve a module name without letting its package __init__ create false ambiguity.
+
+    Exact module identity is stronger evidence than package-prefix compatibility. Prefix
+    matching is retained only as a fallback for partially specified imports and source
+    layouts that the collector can classify as local but cannot name exactly.
+    """
+    exact = set(module_index.get(resolved_name) or set())
+    if exact:
+        return exact
+
+    targets: set[str] = set()
+    for module, ids in module_index.items():
+        if module.startswith(resolved_name + ".") or resolved_name.startswith(module + "."):
+            targets.update(ids)
+    return targets
+
+
 def build_stock_graph(receipts: dict[str, Any]) -> dict[str, Any]:
     """Build Receipt's internal stock graph from catalog evidence only.
 
@@ -199,15 +217,7 @@ def build_stock_graph(receipts: dict[str, Any]) -> dict[str, Any]:
 
         for kind, raw in candidates:
             resolved_name = _resolve_relative(raw, rel) if raw.startswith(".") else raw
-            target_ids: set[str] = set()
-            if resolved_name:
-                for module, ids in module_index.items():
-                    if (
-                        module == resolved_name
-                        or module.startswith(resolved_name + ".")
-                        or resolved_name.startswith(module + ".")
-                    ):
-                        target_ids.update(ids)
+            target_ids = _module_targets(module_index, resolved_name) if resolved_name else set()
 
             if len(target_ids) == 1:
                 target = next(iter(target_ids))
@@ -268,6 +278,7 @@ def build_stock_graph(receipts: dict[str, Any]) -> dict[str, Any]:
             "python_sources": len(nodes),
             "relationships": len(edges),
             "unresolved_relationships": len(unresolved),
+            "symbols": len(symbol_index),
             "external_dependencies": len(external_dependencies),
             "duplicate_symbols": len(duplicate_symbols),
         },
