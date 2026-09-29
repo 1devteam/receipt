@@ -1,0 +1,21 @@
+name: self-hosted-graft-trial
+
+on:
+  pull_request:
+    paths:
+      - 'receipt_graft/**'
+      - 'collector/**'
+      - 'tests/test_receipt_graft.py'
+      - '.github/workflows/self-hosted-graft-trial.yml'
+  workflow_dispatch:
+
+jobs:
+  trial:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - run: pytest -q tests/test_receipt_graft.py
