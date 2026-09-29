@@ -8,6 +8,7 @@ from pathlib import Path
 from collector.collect import CollectError, collect_to
 from collector.find import find_symbol
 from common.io import ReceiptIOError
+from receipt_graft.integration import persist_collection_graph
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,17 +69,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = p.parse_args(argv)
     try:
+        out = Path(args.out)
         data = collect_to(
             args.tree,
-            Path(args.out),
+            out,
             ref=args.ref,
             update=args.update,
             force=args.force,
         )
+        graft = persist_collection_graph(data, out)
     except CollectError as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    except ReceiptIOError as exc:
+    except (ReceiptIOError, OSError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
@@ -98,6 +101,7 @@ def main(argv: list[str] | None = None) -> int:
             or (f.get("contracts") or {}).get("functions")
         ),
         "onboard": data.get("onboard"),
+        "internal_graft": graft,
     }
     if data.get("source"):
         summary["source"] = data["source"]

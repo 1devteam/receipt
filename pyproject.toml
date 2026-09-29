@@ -17,13 +17,14 @@ direct = "director.cli:main"
 pipeline = "pipeline.cli:main"
 insert = "insert.cli:main"
 insertc = "insertc.cli:main"
+receipt-graft = "receipt_graft.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["common", "collector", "compiler", "producer", "director", "pipeline", "receipt_cli*", "insert", "insertc"]
+include = ["common", "collector", "compiler", "producer", "director", "pipeline", "receipt_cli*", "insert", "insertc", "receipt_graft*"]
 
 [tool.setuptools.package-data]
 receipt_cli = ["dashboard/static/*"]
