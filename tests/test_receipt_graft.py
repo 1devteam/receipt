@@ -104,5 +104,5 @@ def test_receipt_can_reconstruct_its_own_stock_end_to_end() -> None:
     assert graph["grants_execution_authority"] is False
     assert graph["security"]["contains_machine_local_origin"] is False
     assert all("origin" not in node["source_identity"] for node in graph["nodes"])
-    assert any(node["path"] == "compiler/compile.py" for node in graph["nodes"])
-    assert any(node["path"] == "receipt_cli/stack.py" for node in graph["nodes"])
+    assert any(node["rel"] == "compiler/compile.py" for node in graph["nodes"])
+    assert any(node["rel"] == "receipt_cli/stack.py" for node in graph["nodes"])
