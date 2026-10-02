@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from common.io import ReceiptIOError, read_json, write_json
 from common.names import batch_package_name
 from compiler.analyze import analyze_source
 from compiler.transform import compile_source
+
+BUILD_MANIFEST_SCHEMA = "receipt.compiler.build.v1"
 
 
 def _tops(rels: list[str]) -> set[str]:
@@ -46,11 +49,29 @@ def _catalog_root(receipts: dict, receipts_path: Path) -> Path | None:
         path = Path(catalog)
         if path.is_dir():
             return path
-    # receipts.json living inside a catalog dir
     parent = receipts_path.parent
     if (parent / "copies").is_dir() or (parent / "index.json").is_file():
         return parent
     return None
+
+
+def _sha_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _contract_names(contracts: dict | None) -> dict[str, list[str]]:
+    contracts = contracts if isinstance(contracts, dict) else {}
+    classes = sorted(
+        str(item.get("name"))
+        for item in contracts.get("classes") or []
+        if isinstance(item, dict) and item.get("name")
+    )
+    functions = sorted(
+        str(item.get("name"))
+        for item in contracts.get("functions") or []
+        if isinstance(item, dict) and item.get("name")
+    )
+    return {"classes": classes, "functions": functions}
 
 
 def compile_receipts(receipts_path: Path, name: str, out: Path) -> dict:
@@ -85,6 +106,8 @@ def compile_receipts(receipts_path: Path, name: str, out: Path) -> dict:
     mod_root.mkdir(parents=True, exist_ok=True)
 
     units = []
+    build_units = []
+    rejected = []
     contracts = {}
     dependencies = {}
     errors = []
@@ -95,13 +118,13 @@ def compile_receipts(receipts_path: Path, name: str, out: Path) -> dict:
         unit_id = _dotted(package, rel)
         src_path = _resolve_source(rec, receipts_path, catalog_hint)
         if src_path is None:
-            errors.append(
-                {
-                    "id": unit_id,
-                    "rel": rel,
-                    "error": f"missing source (copy={rec.get('copy')!r} abs={rec.get('abs')!r})",
-                }
-            )
+            error = {
+                "id": unit_id,
+                "rel": rel,
+                "error": f"missing source (copy={rec.get('copy')!r} abs={rec.get('abs')!r})",
+            }
+            errors.append(error)
+            rejected.append({"id": unit_id, "rel": rel, "reason": "missing_source"})
             continue
         raw = src_path.read_text(encoding="utf-8", errors="replace")
         try:
@@ -115,6 +138,7 @@ def compile_receipts(receipts_path: Path, name: str, out: Path) -> dict:
             )
         except SyntaxError as exc:
             errors.append({"id": unit_id, "rel": rel, "error": f"syntax: {exc}"})
+            rejected.append({"id": unit_id, "rel": rel, "reason": "syntax_error"})
             continue
         if file_warnings.get("relative_imports"):
             warnings.append(
@@ -143,6 +167,60 @@ def compile_receipts(receipts_path: Path, name: str, out: Path) -> dict:
             }
         )
 
+        input_contracts = _contract_names(rec.get("contracts"))
+        output_contracts = _contract_names(contracts[unit_id])
+        build_units.append(
+            {
+                "id": unit_id,
+                "rel": rel,
+                "status": "produced",
+                "source": {
+                    "source_sha256": rec.get("source_sha256") or rec.get("sha256"),
+                    "normalized_sha256": rec.get("normalized_sha256"),
+                },
+                "output": {
+                    "path": f"modules/{rel}",
+                    "sha256": _sha_text(compiled),
+                },
+                "transforms": list(file_warnings.get("transforms") or []),
+                "contracts": {
+                    "input": input_contracts,
+                    "output": output_contracts,
+                    "preserved": input_contracts == output_contracts,
+                },
+                "dependencies": {
+                    "input": rec.get("dependencies") or {},
+                    "output": analysis["dependencies"],
+                },
+                "warnings": {
+                    key: value
+                    for key, value in file_warnings.items()
+                    if key != "transforms"
+                },
+            }
+        )
+
+    build_manifest = {
+        "schema": BUILD_MANIFEST_SCHEMA,
+        "name": name,
+        "package": package,
+        "owner": "receipt",
+        "compiler": "compile",
+        "selection": receipts.get("selection") or {"count": len(files)},
+        "units": build_units,
+        "rejected": rejected,
+        "warnings": warnings,
+        "invariants": {
+            "input_units": len(files),
+            "produced_units": len(build_units),
+            "rejected_units": len(rejected),
+            "all_produced_contracts_preserved": all(
+                bool(unit.get("contracts", {}).get("preserved")) for unit in build_units
+            ),
+            "grants_execution_authority": False,
+        },
+    }
+
     meta = {
         "name": name,
         "package": package,
@@ -153,9 +231,16 @@ def compile_receipts(receipts_path: Path, name: str, out: Path) -> dict:
         "units": units,
         "errors": errors,
         "warnings": warnings,
+        "build_manifest": {
+            "schema": BUILD_MANIFEST_SCHEMA,
+            "path": "build-manifest.json",
+            "produced_units": len(build_units),
+            "rejected_units": len(rejected),
+        },
     }
     write_json(out / "meta.json", meta)
     write_json(out / "contracts.json", contracts)
     write_json(out / "dependencies.json", dependencies)
     write_json(out / "receipts.json", receipts)
+    write_json(out / "build-manifest.json", build_manifest)
     return meta
