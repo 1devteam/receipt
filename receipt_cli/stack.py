@@ -10,9 +10,11 @@ from compiler.compile import compile_receipts
 from director.check import check_project
 from producer.produce import produce
 from receipt_cli.shelf import load_receipts
+from receipt_graft.compatibility import build_compatibility_report
 from receipt_graft.evidence import canonical_fingerprint, stamp_fingerprint
 from receipt_graft.graph import build_stock_graph
 from receipt_graft.impact import build_impact_report
+from receipt_graft.proof import build_proof_plan
 from receipt_graft.reconcile import build_reconciliation_report
 from receipt_graft.runtime import build_runtime_reconciliation
 
@@ -23,22 +25,13 @@ class StackError(ValueError):
 
 def _match_key(files: list[dict], key: str) -> list[dict]:
     key = key.strip()
-    matches = [
-        rec
-        for rec in files
-        if rec.get("rel") == key
-        or rec.get("sha256") == key
-        or (rec.get("sha256") or "").startswith(key)
-        or (rec.get("rel") or "").endswith("/" + key)
-        or (rec.get("rel") or "") == key
-    ]
+    matches = [rec for rec in files if rec.get("rel") == key or rec.get("sha256") == key or (rec.get("sha256") or "").startswith(key) or (rec.get("rel") or "").endswith("/" + key)]
     if not matches and "/" not in key:
         matches = [rec for rec in files if Path(rec.get("rel") or "").name == key]
     if not matches and "." not in key and not key.endswith(".py"):
         soft = []
         for rec in files:
-            stem = Path(rec.get("rel") or "").stem
-            if stem == key:
+            if Path(rec.get("rel") or "").stem == key:
                 soft.append(rec)
                 continue
             classes = (rec.get("contracts") or {}).get("classes") or rec.get("classes") or []
@@ -51,21 +44,18 @@ def _match_key(files: list[dict], key: str) -> list[dict]:
 def resolve_seeds(catalog: Path, keys: list[str]) -> list[dict]:
     data = load_receipts(catalog)
     files = data.get("files") or []
-    selected: list[dict] = []
-    seen: set[str] = set()
+    selected, seen = [], set()
     for key in keys:
         matches = _match_key(files, key)
         if not matches:
             raise StackError(f"no receipt matching seed {key!r}")
         if len(matches) > 1 and not any(m.get("rel") == key for m in matches):
-            rels = [m.get("rel") for m in matches]
-            raise StackError(f"ambiguous seed {key!r}; matches: {rels}")
+            raise StackError(f"ambiguous seed {key!r}; matches: {[m.get('rel') for m in matches]}")
         rec = next((m for m in matches if m.get("rel") == key), matches[0])
         sha = rec.get("sha256") or rec.get("rel")
-        if sha in seen:
-            continue
-        seen.add(sha)
-        selected.append(rec)
+        if sha not in seen:
+            seen.add(sha)
+            selected.append(rec)
     return selected
 
 
@@ -82,28 +72,12 @@ def _receipts_for_local_dep(files: list[dict], module: str) -> list[dict]:
     exact = [f for f in files if f.get("rel") in candidates]
     if exact:
         return exact
-    ended = [
-        f
-        for f in files
-        if any((f.get("rel") or "").endswith("/" + candidate) for candidate in candidates)
-    ]
+    ended = [f for f in files if any((f.get("rel") or "").endswith("/" + candidate) for candidate in candidates)]
     if len(ended) == 1:
         return ended
     stem = module.split(".")[-1]
-    by_stem = [
-        f
-        for f in files
-        if Path(f.get("rel") or "").stem == stem
-        or (
-            Path(f.get("rel") or "").name == "__init__.py"
-            and Path(f.get("rel") or "").parent.name == stem
-        )
-    ]
-    if len(by_stem) == 1:
-        return by_stem
-    if ended:
-        return ended
-    return by_stem
+    by_stem = [f for f in files if Path(f.get("rel") or "").stem == stem or (Path(f.get("rel") or "").name == "__init__.py" and Path(f.get("rel") or "").parent.name == stem)]
+    return ended or by_stem
 
 
 def _relative_target(rel: str, module: str) -> str | None:
@@ -119,9 +93,7 @@ def _relative_target(rel: str, module: str) -> str | None:
         parent = parent[:-ascend]
     if tail:
         parent.extend(part for part in tail.split(".") if part)
-    if not parent:
-        return None
-    return "/".join(parent)
+    return "/".join(parent) if parent else None
 
 
 def _receipts_for_relative_dep(files: list[dict], from_rel: str, module: str) -> list[dict]:
@@ -136,11 +108,7 @@ def close_local_deps(catalog: Path, seeds: list[dict]) -> dict:
     data = load_receipts(catalog)
     files = data.get("files") or []
     by_sha = {f.get("sha256"): f for f in files if f.get("sha256")}
-    selected: dict[str, dict] = {}
-    missing: list[dict] = []
-    ambiguous: list[dict] = []
-    queue: list[dict] = []
-
+    selected, missing, ambiguous, queue = {}, [], [], []
     for rec in seeds:
         sha = rec.get("sha256")
         if sha:
@@ -156,9 +124,7 @@ def close_local_deps(catalog: Path, seeds: list[dict]) -> dict:
             if len(already) == 1:
                 hits = already
             else:
-                ambiguous.append(
-                    {"from": rec.get("rel"), "module": module, "kind": kind, "candidates": [h.get("rel") for h in hits]}
-                )
+                ambiguous.append({"from": rec.get("rel"), "module": module, "kind": kind, "candidates": [h.get("rel") for h in hits]})
                 return
         hit = hits[0]
         sha = hit.get("sha256")
@@ -176,23 +142,9 @@ def close_local_deps(catalog: Path, seeds: list[dict]) -> dict:
 
     units = sorted(selected.values(), key=lambda r: r.get("rel") or "")
     return {
-        "catalog": str(Path(catalog).resolve()),
-        "root": data.get("root"),
-        "seeds": [s.get("rel") for s in seeds],
-        "units": [
-            {
-                "rel": u.get("rel"),
-                "sha256": u.get("sha256"),
-                "classes": [c.get("name") for c in (u.get("contracts") or {}).get("classes") or u.get("classes") or []],
-                "local_deps": (u.get("dependencies") or {}).get("local") or [],
-                "relative_deps": (u.get("dependencies") or {}).get("relative") or [],
-                "external_deps": (u.get("dependencies") or {}).get("external") or [],
-            }
-            for u in units
-        ],
-        "count": len(units),
-        "missing_local": missing,
-        "ambiguous_local": ambiguous,
+        "catalog": str(Path(catalog).resolve()), "root": data.get("root"), "seeds": [s.get("rel") for s in seeds],
+        "units": [{"rel": u.get("rel"), "sha256": u.get("sha256"), "classes": [c.get("name") for c in (u.get("contracts") or {}).get("classes") or u.get("classes") or []], "local_deps": (u.get("dependencies") or {}).get("local") or [], "relative_deps": (u.get("dependencies") or {}).get("relative") or [], "external_deps": (u.get("dependencies") or {}).get("external") or []} for u in units],
+        "count": len(units), "missing_local": missing, "ambiguous_local": ambiguous,
         "external": sorted({dep for u in units for dep in (u.get("dependencies") or {}).get("external") or []}),
         "note": "Closure follows extracted local and relative Python dependency edges only. Ambiguous/missing locals are reported, not invented.",
     }
@@ -205,51 +157,26 @@ def plan(catalog: Path, keys: list[str]) -> dict:
 def _selection_receipts_payload(catalog: Path, plan_data: dict) -> dict:
     data = load_receipts(catalog)
     wanted = {u["sha256"] for u in plan_data["units"]}
-    files = [f for f in (data.get("files") or []) if f.get("sha256") in wanted]
-    return {
-        "root": data.get("root"),
-        "collected_at": data.get("collected_at"),
-        "catalog": str(Path(catalog).resolve()),
-        "onboard": data.get("onboard"),
-        "selection": {"seeds": plan_data["seeds"], "count": plan_data["count"]},
-        "files": files,
-        "skipped": [],
-    }
+    return {"root": data.get("root"), "collected_at": data.get("collected_at"), "catalog": str(Path(catalog).resolve()), "onboard": data.get("onboard"), "selection": {"seeds": plan_data["seeds"], "count": plan_data["count"]}, "files": [f for f in (data.get("files") or []) if f.get("sha256") in wanted], "skipped": []}
 
 
-def _graft_preflight(catalog: Path, seeds: list[str]) -> tuple[dict, str]:
-    data = load_receipts(catalog)
-    graph = build_stock_graph(data)
+def _graft_preflight(catalog: Path, seeds: list[str]) -> tuple[dict, dict, str]:
+    graph = build_stock_graph(load_receipts(catalog))
     graph_fingerprint = canonical_fingerprint(graph)
-    report = build_impact_report(graph, seeds)
-    report["evidence_chain"] = {"stock_graph_fingerprint": graph_fingerprint}
-    stamp_fingerprint(report)
-    return report, graph_fingerprint
+    impact = build_impact_report(graph, seeds)
+    impact["evidence_chain"] = {"stock_graph_fingerprint": graph_fingerprint}
+    stamp_fingerprint(impact)
+    return impact, graph, graph_fingerprint
 
 
 def _graft_summary(report: dict, artifact: Path) -> dict:
     proof = report.get("proof") or {}
-    return {
-        "schema": report.get("schema"),
-        "artifact": str(artifact),
-        "fingerprint": report.get("fingerprint"),
-        "impact": report.get("impact") or {},
-        "candidate_tests": proof.get("candidate_tests") or [],
-        "unresolved_boundaries": len(proof.get("unresolved_boundaries") or []),
-        "grants_execution_authority": False,
-        "implements_plan": False,
-        "change_authority": "not-determined",
-    }
+    return {"schema": report.get("schema"), "artifact": str(artifact), "fingerprint": report.get("fingerprint"), "impact": report.get("impact") or {}, "candidate_tests": proof.get("candidate_tests") or [], "unresolved_boundaries": len(proof.get("unresolved_boundaries") or []), "grants_execution_authority": False, "implements_plan": False, "change_authority": "not-determined"}
 
 
 def _reconciliation_summary(report: dict, artifact: Path) -> dict:
     compiler = report.get("compiler") or {}
-    return {
-        "schema": report.get("schema"), "artifact": str(artifact), "fingerprint": report.get("fingerprint"),
-        "status": report.get("status"), "produced_units": compiler.get("produced_units"),
-        "rejected_units": compiler.get("rejected_units"), "divergences": len(report.get("divergences") or []),
-        "grants_execution_authority": False, "implements_plan": False, "change_authority": "not-determined",
-    }
+    return {"schema": report.get("schema"), "artifact": str(artifact), "fingerprint": report.get("fingerprint"), "status": report.get("status"), "produced_units": compiler.get("produced_units"), "rejected_units": compiler.get("rejected_units"), "divergences": len(report.get("divergences") or []), "grants_execution_authority": False, "implements_plan": False, "change_authority": "not-determined"}
 
 
 def stack(catalog: Path, keys: list[str], *, name: str, out: Path, work: Path | None = None, check: bool = False, force: bool = False) -> dict:
@@ -258,11 +185,7 @@ def stack(catalog: Path, keys: list[str], *, name: str, out: Path, work: Path | 
         raise StackError("selection is empty")
     gaps = (plan_data.get("missing_local") or []) + (plan_data.get("ambiguous_local") or [])
     if gaps and not force:
-        raise StackError(
-            "plan has unresolved local deps "
-            f"(missing={len(plan_data.get('missing_local') or [])}, ambiguous={len(plan_data.get('ambiguous_local') or [])}); "
-            "fix seeds or pass force=True / --force"
-        )
+        raise StackError(f"plan has unresolved local deps (missing={len(plan_data.get('missing_local') or [])}, ambiguous={len(plan_data.get('ambiguous_local') or [])}); fix seeds or pass force=True / --force")
 
     out = Path(out).resolve()
     owns_work = work is None
@@ -275,78 +198,60 @@ def stack(catalog: Path, keys: list[str], *, name: str, out: Path, work: Path | 
         work_path.mkdir(parents=True, exist_ok=True)
 
     try:
-        receipts_path = work_path / "receipts.json"
-        compile_dir = work_path / "compile"
-        payload = _selection_receipts_payload(catalog, plan_data)
-        write_json(receipts_path, payload)
+        receipts_path, compile_dir = work_path / "receipts.json", work_path / "compile"
+        write_json(receipts_path, _selection_receipts_payload(catalog, plan_data))
         write_json(work_path / "plan.json", plan_data)
 
-        graft_report, stock_graph_fingerprint = _graft_preflight(catalog, list(plan_data.get("seeds") or []))
-        work_graft = work_path / "graft" / "impact.v1.json"
-        write_json(work_graft, graft_report)
+        graft_report, stock_graph, stock_graph_fingerprint = _graft_preflight(catalog, list(plan_data.get("seeds") or []))
+        proof_plan = build_proof_plan(stock_graph, graft_report)
+        compatibility = build_compatibility_report(stock_graph)
+        write_json(work_path / "graft" / "impact.v1.json", graft_report)
 
         meta = compile_receipts(receipts_path, name, compile_dir)
+        violations = list(meta.get("contract_violations") or [])
+        if violations and not force:
+            raise StackError(f"compiler contract violations ({len(violations)}); inspect build-manifest.json or pass force=True / --force")
         if not meta["units"]:
             raise StackError("compile produced no units")
         project = produce(compile_dir, out)
 
-        project_graft = out / ".receipt" / "graft" / "impact.v1.json"
-        project_graft.parent.mkdir(parents=True, exist_ok=True)
+        graft_dir = out / ".receipt" / "graft"
+        graft_dir.mkdir(parents=True, exist_ok=True)
+        project_graft = graft_dir / "impact.v1.json"
+        proof_path = graft_dir / "proof-plan.v1.json"
+        compatibility_path = graft_dir / "compatibility.v1.json"
         write_json(project_graft, graft_report)
+        write_json(proof_path, proof_plan)
+        write_json(compatibility_path, compatibility)
 
         build_manifest = read_json(compile_dir / "build-manifest.json")
         build_manifest_fingerprint = canonical_fingerprint(build_manifest)
-        produced_contracts = read_json(out / "contracts.json")
-        produced_dependencies = read_json(out / "dependencies.json")
-        reconciliation = build_reconciliation_report(graft_report, build_manifest, produced_contracts, produced_dependencies)
-        reconciliation["evidence_chain"] = {
-            "stock_graph_fingerprint": stock_graph_fingerprint,
-            "impact_fingerprint": graft_report.get("fingerprint"),
-            "build_manifest_fingerprint": build_manifest_fingerprint,
-        }
+        reconciliation = build_reconciliation_report(graft_report, build_manifest, read_json(out / "contracts.json"), read_json(out / "dependencies.json"))
+        reconciliation["evidence_chain"] = {"stock_graph_fingerprint": stock_graph_fingerprint, "impact_fingerprint": graft_report.get("fingerprint"), "build_manifest_fingerprint": build_manifest_fingerprint, "proof_plan_fingerprint": proof_plan.get("fingerprint"), "compatibility_fingerprint": compatibility.get("fingerprint")}
         stamp_fingerprint(reconciliation)
-        reconciliation_path = out / ".receipt" / "graft" / "build-reconciliation.v1.json"
+        reconciliation_path = graft_dir / "build-reconciliation.v1.json"
         write_json(reconciliation_path, reconciliation)
 
         roster = check_project(out) if check else None
         runtime_report = None
-        runtime_path = out / ".receipt" / "graft" / "runtime-reconciliation.v1.json"
+        runtime_path = graft_dir / "runtime-reconciliation.v1.json"
         if roster is not None:
-            runtime_report = build_runtime_reconciliation(
-                impact_report=graft_report,
-                build_reconciliation=reconciliation,
-                roster=roster,
-                build_manifest_fingerprint=build_manifest_fingerprint,
-                stock_graph_fingerprint=stock_graph_fingerprint,
-            )
+            runtime_report = build_runtime_reconciliation(impact_report=graft_report, build_reconciliation=reconciliation, roster=roster, build_manifest_fingerprint=build_manifest_fingerprint, stock_graph_fingerprint=stock_graph_fingerprint)
+            runtime_report["evidence_chain"]["proof_plan_fingerprint"] = proof_plan.get("fingerprint")
+            runtime_report["evidence_chain"]["compatibility_fingerprint"] = compatibility.get("fingerprint")
+            stamp_fingerprint(runtime_report)
             write_json(runtime_path, runtime_report)
 
         return {
-            "plan": plan_data,
+            "plan": plan_data, "compiler_contracts": {"violations": violations, "forced": bool(force and violations)},
             "graft_preflight": _graft_summary(graft_report, project_graft),
+            "graft_proof_plan": {"artifact": str(proof_path), "fingerprint": proof_plan.get("fingerprint"), "direct_tests": len(proof_plan.get("direct_tests") or []), "indirect_tests": len(proof_plan.get("indirect_tests") or []), "uncovered": len(proof_plan.get("uncovered_affected_stock") or [])},
+            "graft_compatibility": {"artifact": str(compatibility_path), "fingerprint": compatibility.get("fingerprint"), "units": len(compatibility.get("units") or [])},
             "graft_reconciliation": _reconciliation_summary(reconciliation, reconciliation_path),
-            "runtime_reconciliation": (
-                {
-                    "schema": runtime_report.get("schema"), "artifact": str(runtime_path),
-                    "fingerprint": runtime_report.get("fingerprint"), "status": runtime_report.get("status"),
-                    "contradictions": len(runtime_report.get("contradictions") or []),
-                    "grants_execution_authority": False,
-                }
-                if runtime_report else None
-            ),
-            "project": project.get("project") if isinstance(project, dict) else str(out),
-            "package": meta.get("package"),
-            "compiled_units": len(meta.get("units") or []),
-            "compile_errors": meta.get("errors") or [],
+            "runtime_reconciliation": ({"schema": runtime_report.get("schema"), "artifact": str(runtime_path), "fingerprint": runtime_report.get("fingerprint"), "status": runtime_report.get("status"), "contradictions": len(runtime_report.get("contradictions") or []), "grants_execution_authority": False} if runtime_report else None),
+            "project": project.get("project") if isinstance(project, dict) else str(out), "package": meta.get("package"), "compiled_units": len(meta.get("units") or []), "compile_errors": meta.get("errors") or [],
             "execution": {"requested": bool(check), "performed": roster is not None, "boundary": "explicit"},
-            "roster": (
-                {
-                    "ready": roster.get("ready"), "ok": len(roster.get("ok") or []),
-                    "import_error": len(roster.get("import_error") or []), "missing_local": len(roster.get("missing_local") or []),
-                    "accounted": roster.get("accounted"), "local_graph_ok": roster.get("local_graph_ok"),
-                }
-                if roster else None
-            ),
+            "roster": ({"ready": roster.get("ready"), "ok": len(roster.get("ok") or []), "import_error": len(roster.get("import_error") or []), "missing_local": len(roster.get("missing_local") or []), "accounted": roster.get("accounted"), "local_graph_ok": roster.get("local_graph_ok")} if roster else None),
         }
     finally:
         if owns_work and tmp is not None:
