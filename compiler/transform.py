@@ -38,9 +38,17 @@ class StripOwner(ast.NodeTransformer):
         self.tops = tops
         self.rels = rels
         self.relative_imports = 0
+        self.events: list[dict] = []
 
     def visit_If(self, node: ast.If):
         if _is_main_guard(node):
+            self.events.append(
+                {
+                    "kind": "remove_main_guard",
+                    "line": getattr(node, "lineno", None),
+                    "evidence": "__name__ == '__main__'",
+                }
+            )
             return None
         return self.generic_visit(node)
 
@@ -51,6 +59,15 @@ class StripOwner(ast.NodeTransformer):
             if rewritten:
                 asname = alias.asname or alias.name.split(".", 1)[0]
                 new_names.append(ast.alias(name=rewritten, asname=asname))
+                self.events.append(
+                    {
+                        "kind": "rewrite_import",
+                        "line": getattr(node, "lineno", None),
+                        "from": alias.name,
+                        "to": rewritten,
+                        "binding": asname,
+                    }
+                )
             else:
                 new_names.append(alias)
         node.names = new_names
@@ -62,9 +79,19 @@ class StripOwner(ast.NodeTransformer):
             return node
         if not node.module:
             return node
-        rewritten = resolve_local(node.module, self.package, self.tops, self.rels)
+        original = node.module
+        rewritten = resolve_local(original, self.package, self.tops, self.rels)
         if rewritten:
             node.module = rewritten
+            self.events.append(
+                {
+                    "kind": "rewrite_from_import",
+                    "line": getattr(node, "lineno", None),
+                    "from": original,
+                    "to": rewritten,
+                    "names": sorted(alias.asname or alias.name for alias in node.names),
+                }
+            )
         return node
 
 
@@ -91,7 +118,7 @@ def compile_source(
     unit_id: str,
     rels: list[str] | None = None,
 ) -> tuple[str, dict]:
-    """Compile source. Returns (compiled_text, warnings)."""
+    """Compile source and return compiled text plus transformation evidence/warnings."""
     tree = ast.parse(source)
     transformer = StripOwner(package, tops, rels or [])
     tree = transformer.visit(tree)
@@ -110,7 +137,16 @@ def compile_source(
     tree.body = ([docstring] if docstring else []) + _stamp(origin, unit_id) + rest
     ast.fix_missing_locations(tree)
     header = f"# receipt-owned by {OWNER}\n# origin: {origin}\n# id: {unit_id}\n"
-    warnings: dict = {}
+    warnings: dict = {
+        "transforms": [
+            *transformer.events,
+            {
+                "kind": "stamp_receipt_identity",
+                "owner": OWNER,
+                "unit_id": unit_id,
+            },
+        ]
+    }
     if transformer.relative_imports:
         warnings["relative_imports"] = transformer.relative_imports
     return header + ast.unparse(tree) + "\n", warnings

@@ -5,13 +5,14 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from common.io import write_json
+from common.io import read_json, write_json
 from compiler.compile import compile_receipts
 from director.check import check_project
 from producer.produce import produce
 from receipt_cli.shelf import load_receipts
 from receipt_graft.graph import build_stock_graph
 from receipt_graft.impact import build_impact_report
+from receipt_graft.reconcile import build_reconciliation_report
 
 
 class StackError(ValueError):
@@ -272,6 +273,22 @@ def _graft_summary(report: dict, artifact: Path) -> dict:
     }
 
 
+def _reconciliation_summary(report: dict, artifact: Path) -> dict:
+    compiler = report.get("compiler") or {}
+    return {
+        "schema": report.get("schema"),
+        "artifact": str(artifact),
+        "fingerprint": report.get("fingerprint"),
+        "status": report.get("status"),
+        "produced_units": compiler.get("produced_units"),
+        "rejected_units": compiler.get("rejected_units"),
+        "divergences": len(report.get("divergences") or []),
+        "grants_execution_authority": False,
+        "implements_plan": False,
+        "change_authority": "not-determined",
+    }
+
+
 def stack(
     catalog: Path,
     keys: list[str],
@@ -325,11 +342,24 @@ def stack(
         project_graft.parent.mkdir(parents=True, exist_ok=True)
         write_json(project_graft, graft_report)
 
+        build_manifest = read_json(compile_dir / "build-manifest.json")
+        produced_contracts = read_json(out / "contracts.json")
+        produced_dependencies = read_json(out / "dependencies.json")
+        reconciliation = build_reconciliation_report(
+            graft_report,
+            build_manifest,
+            produced_contracts,
+            produced_dependencies,
+        )
+        reconciliation_path = out / ".receipt" / "graft" / "build-reconciliation.v1.json"
+        write_json(reconciliation_path, reconciliation)
+
         roster = check_project(out) if check else None
 
         return {
             "plan": plan_data,
             "graft_preflight": _graft_summary(graft_report, project_graft),
+            "graft_reconciliation": _reconciliation_summary(reconciliation, reconciliation_path),
             "project": project.get("project") if isinstance(project, dict) else str(out),
             "package": meta.get("package"),
             "compiled_units": len(meta.get("units") or []),
