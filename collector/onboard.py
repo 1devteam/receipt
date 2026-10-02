@@ -156,11 +156,13 @@ def _close_exact_from_import_modules(
     topology: dict,
     local_modules: set[str] | None,
 ) -> dict:
-    """Add imported child modules when a `from package import child` binding proves one.
+    """Refine `from package import child` against exact collected-module evidence.
 
-    The generic import dependency remains (`package`), but an exact target is added only
-    when that target is itself a known collected module. This avoids treating ordinary
-    imported symbols from third-party or local modules as submodules.
+    If `package.child` is a collected module, add that exact child dependency. If the
+    broad parent `package` is not itself a collected module (for example a namespace
+    package without `__init__.py`), remove the broad parent so closure does not report
+    a false missing dependency. Imported symbols are never promoted to modules unless
+    their full target exactly matches a collected module.
     """
     known = local_modules or set()
     local = set(dependencies.get("local") or [])
@@ -168,8 +170,12 @@ def _close_exact_from_import_modules(
         if not isinstance(item, dict) or item.get("kind") != "from_import":
             continue
         target = str(item.get("target") or "").strip()
-        if target and not target.startswith(".") and target in known:
-            local.add(target)
+        if not target or target.startswith(".") or target not in known:
+            continue
+        local.add(target)
+        parent = target.rsplit(".", 1)[0] if "." in target else ""
+        if parent and parent in local and parent not in known:
+            local.discard(parent)
     return {**dependencies, "local": sorted(local)}
 
 
