@@ -6,6 +6,7 @@ from pathlib import Path
 from common.io import ReceiptIOError, read_json, write_json
 from common.names import batch_package_name
 from compiler.analyze import analyze_source
+from compiler.contracts import validate_compiled_unit, validate_inventory, validate_source_identity
 from compiler.transform import compile_source
 
 BUILD_MANIFEST_SCHEMA = "receipt.compiler.build.v1"
@@ -25,7 +26,6 @@ def _dotted(package: str, rel: str) -> str:
 
 
 def _resolve_source(rec: dict, receipts_path: Path, catalog_hint: Path | None) -> Path | None:
-    """Prefer catalog copy (portable), then absolute origin path."""
     copy = rec.get("copy")
     if copy:
         candidates: list[Path] = []
@@ -61,26 +61,14 @@ def _sha_text(text: str) -> str:
 
 def _contract_names(contracts: dict | None) -> dict[str, list[str]]:
     contracts = contracts if isinstance(contracts, dict) else {}
-    classes = sorted(
-        str(item.get("name"))
-        for item in contracts.get("classes") or []
-        if isinstance(item, dict) and item.get("name")
-    )
-    functions = sorted(
-        str(item.get("name"))
-        for item in contracts.get("functions") or []
-        if isinstance(item, dict) and item.get("name")
-    )
+    classes = sorted(str(item.get("name")) for item in contracts.get("classes") or [] if isinstance(item, dict) and item.get("name"))
+    functions = sorted(str(item.get("name")) for item in contracts.get("functions") or [] if isinstance(item, dict) and item.get("name"))
     return {"classes": classes, "functions": functions}
 
 
 def compile_receipts(receipts_path: Path, name: str, out: Path) -> dict:
     receipts_path = Path(receipts_path).resolve()
-    try:
-        receipts = read_json(receipts_path)
-    except ReceiptIOError:
-        raise
-
+    receipts = read_json(receipts_path)
     if not isinstance(receipts, dict):
         raise SystemExit(f"receipts must be an object: {receipts_path}")
     if "root" not in receipts:
@@ -97,6 +85,7 @@ def compile_receipts(receipts_path: Path, name: str, out: Path) -> dict:
         if not rec.get("copy") and not rec.get("abs"):
             raise SystemExit(f"receipt entry missing copy/abs for {rec.get('rel')}: {receipts_path}")
 
+    contract_violations = validate_inventory(files)
     rels = [f["rel"] for f in files]
     tops = _tops(rels)
     origin_root = receipts["root"]
@@ -118,85 +107,56 @@ def compile_receipts(receipts_path: Path, name: str, out: Path) -> dict:
         unit_id = _dotted(package, rel)
         src_path = _resolve_source(rec, receipts_path, catalog_hint)
         if src_path is None:
-            error = {
-                "id": unit_id,
-                "rel": rel,
-                "error": f"missing source (copy={rec.get('copy')!r} abs={rec.get('abs')!r})",
-            }
-            errors.append(error)
+            errors.append({"id": unit_id, "rel": rel, "error": "missing source"})
             rejected.append({"id": unit_id, "rel": rel, "reason": "missing_source"})
             continue
         raw = src_path.read_text(encoding="utf-8", errors="replace")
+        identity_violations = validate_source_identity(rec, raw)
+        if identity_violations:
+            contract_violations.extend(identity_violations)
+            rejected.append({"id": unit_id, "rel": rel, "reason": "source_identity_mismatch"})
+            continue
         try:
-            compiled, file_warnings = compile_source(
-                raw,
-                package=package,
-                tops=tops,
-                origin=f"{origin_root}/{rel}",
-                unit_id=unit_id,
-                rels=rels,
-            )
+            compiled, file_warnings = compile_source(raw, package=package, tops=tops, origin=f"{origin_root}/{rel}", unit_id=unit_id, rels=rels)
         except SyntaxError as exc:
             errors.append({"id": unit_id, "rel": rel, "error": f"syntax: {exc}"})
             rejected.append({"id": unit_id, "rel": rel, "reason": "syntax_error"})
             continue
+
         if file_warnings.get("relative_imports"):
-            warnings.append(
-                {
-                    "id": unit_id,
-                    "rel": rel,
-                    "warning": f"relative imports left untouched ({file_warnings['relative_imports']})",
-                }
-            )
+            warnings.append({"id": unit_id, "rel": rel, "warning": f"relative imports left untouched ({file_warnings['relative_imports']})"})
         dest = mod_root / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(compiled, encoding="utf-8")
         analysis = analyze_source(compiled, insert_id=unit_id, package=package)
-        contracts[unit_id] = {
-            "classes": analysis["classes"],
-            "functions": analysis["functions"],
-        }
+        contracts[unit_id] = {"classes": analysis["classes"], "functions": analysis["functions"]}
         dependencies[unit_id] = analysis["dependencies"]
-        units.append(
-            {
-                "id": unit_id,
-                "rel": rel,
-                "origin": rec.get("abs") or str(src_path),
-                "source": str(src_path),
-                "sha256": rec.get("sha256"),
-            }
-        )
-
         input_contracts = _contract_names(rec.get("contracts"))
         output_contracts = _contract_names(contracts[unit_id])
+        unit_violations = validate_compiled_unit(
+            rel=rel,
+            input_contracts=input_contracts,
+            output_contracts=output_contracts,
+            transforms=list(file_warnings.get("transforms") or []),
+            input_dependencies=rec.get("dependencies") or {},
+            output_dependencies=analysis["dependencies"],
+            package=package,
+        )
+        contract_violations.extend(unit_violations)
+
+        units.append({"id": unit_id, "rel": rel, "origin": rec.get("abs") or str(src_path), "source": str(src_path), "sha256": rec.get("sha256")})
         build_units.append(
             {
                 "id": unit_id,
                 "rel": rel,
                 "status": "produced",
-                "source": {
-                    "source_sha256": rec.get("source_sha256") or rec.get("sha256"),
-                    "normalized_sha256": rec.get("normalized_sha256"),
-                },
-                "output": {
-                    "path": f"modules/{rel}",
-                    "sha256": _sha_text(compiled),
-                },
+                "source": {"source_sha256": rec.get("source_sha256") or rec.get("sha256"), "normalized_sha256": rec.get("normalized_sha256")},
+                "output": {"path": f"modules/{rel}", "sha256": _sha_text(compiled)},
                 "transforms": list(file_warnings.get("transforms") or []),
-                "contracts": {
-                    "input": input_contracts,
-                    "output": output_contracts,
-                    "preserved": input_contracts == output_contracts,
-                },
-                "dependencies": {
-                    "input": rec.get("dependencies") or {},
-                    "output": analysis["dependencies"],
-                },
-                "warnings": {
-                    key: value
-                    for key, value in file_warnings.items()
-                    if key != "transforms"
-                },
+                "contracts": {"input": input_contracts, "output": output_contracts, "preserved": input_contracts == output_contracts},
+                "dependencies": {"input": rec.get("dependencies") or {}, "output": analysis["dependencies"]},
+                "warnings": {key: value for key, value in file_warnings.items() if key != "transforms"},
+                "contract_violations": unit_violations,
             }
         )
 
@@ -210,13 +170,15 @@ def compile_receipts(receipts_path: Path, name: str, out: Path) -> dict:
         "units": build_units,
         "rejected": rejected,
         "warnings": warnings,
+        "contract_violations": contract_violations,
         "invariants": {
             "input_units": len(files),
             "produced_units": len(build_units),
             "rejected_units": len(rejected),
-            "all_produced_contracts_preserved": all(
-                bool(unit.get("contracts", {}).get("preserved")) for unit in build_units
-            ),
+            "contract_violations": len(contract_violations),
+            "all_produced_contracts_preserved": all(bool(unit.get("contracts", {}).get("preserved")) for unit in build_units),
+            "source_identity_verified": not any(v.get("kind") == "normalized_source_identity_mismatch" for v in contract_violations),
+            "output_namespace_unambiguous": not any(v.get("kind") in {"duplicate_output_path", "module_package_collision"} for v in contract_violations),
             "grants_execution_authority": False,
         },
     }
@@ -231,12 +193,8 @@ def compile_receipts(receipts_path: Path, name: str, out: Path) -> dict:
         "units": units,
         "errors": errors,
         "warnings": warnings,
-        "build_manifest": {
-            "schema": BUILD_MANIFEST_SCHEMA,
-            "path": "build-manifest.json",
-            "produced_units": len(build_units),
-            "rejected_units": len(rejected),
-        },
+        "contract_violations": contract_violations,
+        "build_manifest": {"schema": BUILD_MANIFEST_SCHEMA, "path": "build-manifest.json", "produced_units": len(build_units), "rejected_units": len(rejected), "contract_violations": len(contract_violations)},
     }
     write_json(out / "meta.json", meta)
     write_json(out / "contracts.json", contracts)
