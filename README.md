@@ -30,14 +30,20 @@ receipt list   -c ~/projects/catalogs/mytree -q Core
 receipt find   ping -c ~/projects/catalogs/mytree
 receipt show   CoreStatus.py -c ~/projects/catalogs/mytree
 
-# 3. Plan dependency closure, then stack
+# 3. Ask Receipt's internal G.R.A.F.T.+ for blast radius + proof surfaces
+receipt-graft ~/projects/catalogs/mytree --impact CoreStatus.py
+
+# 4. Plan dependency closure, then stack
 receipt plan  CoreStatus.py -c ~/projects/catalogs/mytree
 receipt stack CoreStatus.py --name spine -o ~/projects/compiled/spine
 
 # Gaps (missing/ambiguous local deps) refuse stack unless --force
 receipt stack Seed.py --name partial -o /tmp/partial --force
 
-# 4. Dashboard (browse, inspect normalized source, collect, plan, stack)
+# Runtime import checking is an explicit trust transition
+receipt stack CoreStatus.py --name spine-checked -o ~/projects/compiled/spine-checked --check
+
+# 5. Dashboard (browse, inspect normalized source, collect, plan, stack)
 receipt dashboard
 # http://127.0.0.1:8787/
 ```
@@ -86,7 +92,7 @@ When a `.py` is collected onto the shelf:
 | **Preserve raw source** | Exact original bytes are stored under `raw/` and keyed by `source_sha256`. |
 | **Normalize compile source** | Python is parsed/unparsed; `__main__` launchers and Receipt/Insert ownership metadata are removed when present. |
 | **Record transforms** | Each receipt records `source_sha256`, `normalized_sha256`, and the exact normalization transform names applied. |
-| **Extract to sidecars** | **contracts** (classes/methods/functions) and **dependencies** (local / external / relative / stdlib). |
+| **Extract to sidecars** | **contracts**, **dependencies**, and **topology** (bindings, calls, inheritance, dynamic imports, env/effect surfaces). |
 | **Keep in normalized `.py`** | APIs and imports remain in the compile source; contracts are not deleted from source. |
 
 `sha256` remains an alias for the original source-content SHA-256 for compatibility. `copy` points at the normalized compile source.
@@ -101,16 +107,40 @@ catalog/
   normalized/<normalized-sha>.py
   contracts/<source-sha>.json
   dependencies/<source-sha>.json
+  topology/<source-sha>.json
+  graft/stock-graph.v1.json
+  graft/impact.v1.json        # when impact analysis is requested
 ```
 
-This split is intentional: raw source proves exactly what Receipt collected; normalized source proves exactly what Receipt compiles.
+This split is intentional: raw source proves exactly what Receipt collected; normalized source proves exactly what Receipt compiles; sidecars and G.R.A.F.T.+ artifacts expose architecture without becoming execution authority.
+
+## Internal G.R.A.F.T.+
+
+Receipt's internal G.R.A.F.T.+ is a deterministic, source-grounded reconstruction of the stock. It exposes module identity, contracts, import/call/inheritance relationships, dynamic boundaries, environment reads, external dependencies, effect surfaces, unresolved relationships, and adjacency while leaving the final application outcome open.
+
+```bash
+# rebuild the current stock graph
+receipt-graft ~/projects/catalogs/mytree
+
+# derive a bidirectional blast-radius/proof slice from a rel path, module, class, or function seed
+receipt-graft ~/projects/catalogs/mytree --impact compiler/compile.py
+receipt-graft ~/projects/catalogs/mytree --impact compiler.compile
+
+# multiple seeds describe one candidate change/assembly surface
+receipt-graft ~/projects/catalogs/mytree --impact compiler.compile producer.produce
+```
+
+The impact artifact reports direct and transitive upstream/downstream reachability, relationship kinds, unresolved boundaries, external dependencies, environment/effect surfaces, and candidate test files. Reachability is evidence of possible impact, **not** an instruction that every reachable file must change. The report is content-fingerprinted and carries `grants_execution_authority=false`, `implements_plan=false`, and `change_authority=not-determined`.
+
+Receipt preserves the external G.R.A.F.T.+ identity/evidence bridge so a larger future build can correlate Receipt stock evidence with the universal graph without merging responsibilities or authority.
 
 ## Plan / stack
 
 - **`receipt plan`** — resolve seed units and close along extracted absolute-local and relative Python dependency edges. Reports `missing_local` / `ambiguous_local`; does not invent glue.
 - Nested imports participate in dependency discovery.
 - Conventional `src/` and `lib/` source roots are recognized when classifying absolute imports.
-- **`receipt stack`** — plan → compile → produce → director check. Refuses unresolved local deps unless `--force`.
+- **`receipt stack`** — plan → compile → produce. Refuses unresolved local deps unless `--force`.
+- `--check` explicitly asks the director to import/check produced code after build.
 - Produced projects include an installable `pyproject.toml` (`build-system` + `packages.find` where `src`).
 
 ## Dashboard
@@ -142,11 +172,11 @@ python -m pipeline build https://github.com/owner/repo --name evolved --out ~/pr
 
 | Program | Job |
 |---|---|
-| `collect` | receipts / catalog only |
+| `collect` | receipts / catalog + internal stock graph |
 | `compile` | rewrite + contracts + deps (staging dir) |
 | `produce` | print a project to disk |
-| `direct` | first-start roster, then calls |
-| `pipeline` | one-shot collect → compile → produce → check |
+| `direct` | explicit check + calls |
+| `pipeline` | one-shot collect → graph → compile → produce; check only when requested |
 
 Same steps are also available as `receipt collect|compile|produce|direct|pipeline …`.
 
@@ -155,9 +185,10 @@ Same steps are also available as `receipt collect|compile|produce|direct|pipelin
 - **Source-to-source.** No binary. Stack = Python package + maps.
 - Broken Python fails that unit at compile; recorded in `errors` / `compile_errors`.
 - External imports are observed module names, not proven Python distribution names. Producer currently writes those roots to `requirements.txt` as a best-effort manifest.
-- Side effects on import still happen; director isolates imports in subprocesses.
+- Side effects on import can occur when explicit runtime checking is requested; director isolates imports in subprocesses.
 - The pipeline does not invent glue between files that never imported each other.
 - Relative imports are preserved in compiled source after their dependency edges participate in planning.
+- Static G.R.A.F.T.+ relationships are evidence-backed but cannot prove runtime-only behavior unless runtime evidence is later attached.
 
 ## Exit codes
 
@@ -173,10 +204,11 @@ Same steps are also available as `receipt collect|compile|produce|direct|pipelin
 ```text
 receipt/
   receipt_cli/   # product CLI + shelf + stack + dashboard
-  collector/     # scan, preserve, normalize, catalog, find
+  collector/     # scan, preserve, normalize, catalog, topology extraction
+  receipt_graft/ # internal stock graph + impact/proof reconstruction
   compiler/      # owned-module rewrite
   producer/      # project printer
-  director/      # check + call
+  director/      # explicit check + call
   pipeline/      # one-shot glue
   common/        # io, names, refuse
   insert/        # legacy house (demoted)
