@@ -151,6 +151,34 @@ def extract_dependencies(
     }
 
 
+def _close_exact_from_import_modules(
+    dependencies: dict,
+    topology: dict,
+    local_modules: set[str] | None,
+) -> dict:
+    """Refine `from package import child` against exact collected-module evidence.
+
+    If `package.child` is a collected module, add that exact child dependency. If the
+    broad parent `package` is not itself a collected module (for example a namespace
+    package without `__init__.py`), remove the broad parent so closure does not report
+    a false missing dependency. Imported symbols are never promoted to modules unless
+    their full target exactly matches a collected module.
+    """
+    known = local_modules or set()
+    local = set(dependencies.get("local") or [])
+    for item in topology.get("import_bindings") or []:
+        if not isinstance(item, dict) or item.get("kind") != "from_import":
+            continue
+        target = str(item.get("target") or "").strip()
+        if not target or target.startswith(".") or target not in known:
+            continue
+        local.add(target)
+        parent = target.rsplit(".", 1)[0] if "." in target else ""
+        if parent and parent in local and parent not in known:
+            local.discard(parent)
+    return {**dependencies, "local": sorted(local)}
+
+
 def tops_from_rels(rels: list[str]) -> set[str]:
     tops: set[str] = set()
     for rel in rels:
@@ -199,6 +227,11 @@ def onboard_source(
         info.get("imports") or [],
         tops,
         local_modules=local_modules,
+    )
+    dependencies = _close_exact_from_import_modules(
+        dependencies,
+        topology,
+        local_modules,
     )
     stripped = strip_for_shelf(source) if info["syntax_ok"] else None
     owner_noise = _had_owner_noise(source)

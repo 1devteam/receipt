@@ -10,6 +10,8 @@ from compiler.compile import compile_receipts
 from director.check import check_project
 from producer.produce import produce
 from receipt_cli.shelf import load_receipts
+from receipt_graft.graph import build_stock_graph
+from receipt_graft.impact import build_impact_report
 
 
 class StackError(ValueError):
@@ -30,7 +32,6 @@ def _match_key(files: list[dict], key: str) -> list[dict]:
     if not matches and "/" not in key:
         matches = [rec for rec in files if Path(rec.get("rel") or "").name == key]
     if not matches and "." not in key and not key.endswith(".py"):
-        # class / symbol name via basename stem or contracts
         soft = []
         for rec in files:
             stem = Path(rec.get("rel") or "").stem
@@ -103,11 +104,7 @@ def _receipts_for_local_dep(files: list[dict], module: str) -> list[dict]:
 
 
 def _relative_target(rel: str, module: str) -> str | None:
-    """Resolve a dotted relative import against a receipt path.
-
-    ``.foo`` means sibling ``foo``; ``..foo`` ascends one package level.
-    The returned value is a repository-relative module path without extension.
-    """
+    """Resolve a dotted relative import against a receipt path."""
     dots = len(module) - len(module.lstrip("."))
     if dots <= 0:
         return None
@@ -253,6 +250,28 @@ def _selection_receipts_payload(catalog: Path, plan_data: dict) -> dict:
     }
 
 
+def _graft_preflight(catalog: Path, seeds: list[str]) -> dict:
+    """Build blast-radius evidence from the full shelf, not only compile closure."""
+    data = load_receipts(catalog)
+    graph = build_stock_graph(data)
+    return build_impact_report(graph, seeds)
+
+
+def _graft_summary(report: dict, artifact: Path) -> dict:
+    proof = report.get("proof") or {}
+    return {
+        "schema": report.get("schema"),
+        "artifact": str(artifact),
+        "fingerprint": report.get("fingerprint"),
+        "impact": report.get("impact") or {},
+        "candidate_tests": proof.get("candidate_tests") or [],
+        "unresolved_boundaries": len(proof.get("unresolved_boundaries") or []),
+        "grants_execution_authority": False,
+        "implements_plan": False,
+        "change_authority": "not-determined",
+    }
+
+
 def stack(
     catalog: Path,
     keys: list[str],
@@ -293,14 +312,24 @@ def stack(
         write_json(receipts_path, payload)
         write_json(work_path / "plan.json", plan_data)
 
+        graft_report = _graft_preflight(catalog, list(plan_data.get("seeds") or []))
+        work_graft = work_path / "graft" / "impact.v1.json"
+        write_json(work_graft, graft_report)
+
         meta = compile_receipts(receipts_path, name, compile_dir)
         if not meta["units"]:
             raise StackError("compile produced no units")
         project = produce(compile_dir, out)
+
+        project_graft = out / ".receipt" / "graft" / "impact.v1.json"
+        project_graft.parent.mkdir(parents=True, exist_ok=True)
+        write_json(project_graft, graft_report)
+
         roster = check_project(out) if check else None
 
         return {
             "plan": plan_data,
+            "graft_preflight": _graft_summary(graft_report, project_graft),
             "project": project.get("project") if isinstance(project, dict) else str(out),
             "package": meta.get("package"),
             "compiled_units": len(meta.get("units") or []),
