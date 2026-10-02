@@ -151,6 +151,28 @@ def extract_dependencies(
     }
 
 
+def _close_exact_from_import_modules(
+    dependencies: dict,
+    topology: dict,
+    local_modules: set[str] | None,
+) -> dict:
+    """Add imported child modules when a `from package import child` binding proves one.
+
+    The generic import dependency remains (`package`), but an exact target is added only
+    when that target is itself a known collected module. This avoids treating ordinary
+    imported symbols from third-party or local modules as submodules.
+    """
+    known = local_modules or set()
+    local = set(dependencies.get("local") or [])
+    for item in topology.get("import_bindings") or []:
+        if not isinstance(item, dict) or item.get("kind") != "from_import":
+            continue
+        target = str(item.get("target") or "").strip()
+        if target and not target.startswith(".") and target in known:
+            local.add(target)
+    return {**dependencies, "local": sorted(local)}
+
+
 def tops_from_rels(rels: list[str]) -> set[str]:
     tops: set[str] = set()
     for rel in rels:
@@ -199,6 +221,11 @@ def onboard_source(
         info.get("imports") or [],
         tops,
         local_modules=local_modules,
+    )
+    dependencies = _close_exact_from_import_modules(
+        dependencies,
+        topology,
+        local_modules,
     )
     stripped = strip_for_shelf(source) if info["syntax_ok"] else None
     owner_noise = _had_owner_noise(source)
