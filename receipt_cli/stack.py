@@ -10,9 +10,11 @@ from compiler.compile import compile_receipts
 from director.check import check_project
 from producer.produce import produce
 from receipt_cli.shelf import load_receipts
+from receipt_graft.evidence import canonical_fingerprint, stamp_fingerprint
 from receipt_graft.graph import build_stock_graph
 from receipt_graft.impact import build_impact_report
 from receipt_graft.reconcile import build_reconciliation_report
+from receipt_graft.runtime import build_runtime_reconciliation
 
 
 class StackError(ValueError):
@@ -105,7 +107,6 @@ def _receipts_for_local_dep(files: list[dict], module: str) -> list[dict]:
 
 
 def _relative_target(rel: str, module: str) -> str | None:
-    """Resolve a dotted relative import against a receipt path."""
     dots = len(module) - len(module.lstrip("."))
     if dots <= 0:
         return None
@@ -132,11 +133,9 @@ def _receipts_for_relative_dep(files: list[dict], from_rel: str, module: str) ->
 
 
 def close_local_deps(catalog: Path, seeds: list[dict]) -> dict:
-    """Expand selection along extracted local and relative dependency edges only."""
     data = load_receipts(catalog)
     files = data.get("files") or []
     by_sha = {f.get("sha256"): f for f in files if f.get("sha256")}
-
     selected: dict[str, dict] = {}
     missing: list[dict] = []
     ambiguous: list[dict] = []
@@ -144,10 +143,9 @@ def close_local_deps(catalog: Path, seeds: list[dict]) -> dict:
 
     for rec in seeds:
         sha = rec.get("sha256")
-        if not sha:
-            continue
-        selected[sha] = rec
-        queue.append(rec)
+        if sha:
+            selected[sha] = rec
+            queue.append(rec)
 
     def include_or_record(rec: dict, module: str, hits: list[dict], *, kind: str) -> None:
         if not hits:
@@ -159,38 +157,22 @@ def close_local_deps(catalog: Path, seeds: list[dict]) -> dict:
                 hits = already
             else:
                 ambiguous.append(
-                    {
-                        "from": rec.get("rel"),
-                        "module": module,
-                        "kind": kind,
-                        "candidates": [h.get("rel") for h in hits],
-                    }
+                    {"from": rec.get("rel"), "module": module, "kind": kind, "candidates": [h.get("rel") for h in hits]}
                 )
                 return
         hit = hits[0]
         sha = hit.get("sha256")
-        if not sha or sha in selected:
-            return
-        selected[sha] = by_sha.get(sha, hit)
-        queue.append(selected[sha])
+        if sha and sha not in selected:
+            selected[sha] = by_sha.get(sha, hit)
+            queue.append(selected[sha])
 
     while queue:
         rec = queue.pop(0)
         deps = rec.get("dependencies") or {}
         for module in deps.get("local") or []:
-            include_or_record(
-                rec,
-                module,
-                _receipts_for_local_dep(files, module),
-                kind="local",
-            )
+            include_or_record(rec, module, _receipts_for_local_dep(files, module), kind="local")
         for module in deps.get("relative") or []:
-            include_or_record(
-                rec,
-                module,
-                _receipts_for_relative_dep(files, rec.get("rel") or "", module),
-                kind="relative",
-            )
+            include_or_record(rec, module, _receipts_for_relative_dep(files, rec.get("rel") or "", module), kind="relative")
 
     units = sorted(selected.values(), key=lambda r: r.get("rel") or "")
     return {
@@ -201,10 +183,7 @@ def close_local_deps(catalog: Path, seeds: list[dict]) -> dict:
             {
                 "rel": u.get("rel"),
                 "sha256": u.get("sha256"),
-                "classes": [
-                    c.get("name")
-                    for c in (u.get("contracts") or {}).get("classes") or u.get("classes") or []
-                ],
+                "classes": [c.get("name") for c in (u.get("contracts") or {}).get("classes") or u.get("classes") or []],
                 "local_deps": (u.get("dependencies") or {}).get("local") or [],
                 "relative_deps": (u.get("dependencies") or {}).get("relative") or [],
                 "external_deps": (u.get("dependencies") or {}).get("external") or [],
@@ -214,23 +193,13 @@ def close_local_deps(catalog: Path, seeds: list[dict]) -> dict:
         "count": len(units),
         "missing_local": missing,
         "ambiguous_local": ambiguous,
-        "external": sorted(
-            {
-                dep
-                for u in units
-                for dep in (u.get("dependencies") or {}).get("external") or []
-            }
-        ),
-        "note": (
-            "Closure follows extracted local and relative Python dependency edges only. "
-            "Ambiguous/missing locals are reported, not invented."
-        ),
+        "external": sorted({dep for u in units for dep in (u.get("dependencies") or {}).get("external") or []}),
+        "note": "Closure follows extracted local and relative Python dependency edges only. Ambiguous/missing locals are reported, not invented.",
     }
 
 
 def plan(catalog: Path, keys: list[str]) -> dict:
-    seeds = resolve_seeds(catalog, keys)
-    return close_local_deps(catalog, seeds)
+    return close_local_deps(catalog, resolve_seeds(catalog, keys))
 
 
 def _selection_receipts_payload(catalog: Path, plan_data: dict) -> dict:
@@ -242,20 +211,20 @@ def _selection_receipts_payload(catalog: Path, plan_data: dict) -> dict:
         "collected_at": data.get("collected_at"),
         "catalog": str(Path(catalog).resolve()),
         "onboard": data.get("onboard"),
-        "selection": {
-            "seeds": plan_data["seeds"],
-            "count": plan_data["count"],
-        },
+        "selection": {"seeds": plan_data["seeds"], "count": plan_data["count"]},
         "files": files,
         "skipped": [],
     }
 
 
-def _graft_preflight(catalog: Path, seeds: list[str]) -> dict:
-    """Build blast-radius evidence from the full shelf, not only compile closure."""
+def _graft_preflight(catalog: Path, seeds: list[str]) -> tuple[dict, str]:
     data = load_receipts(catalog)
     graph = build_stock_graph(data)
-    return build_impact_report(graph, seeds)
+    graph_fingerprint = canonical_fingerprint(graph)
+    report = build_impact_report(graph, seeds)
+    report["evidence_chain"] = {"stock_graph_fingerprint": graph_fingerprint}
+    stamp_fingerprint(report)
+    return report, graph_fingerprint
 
 
 def _graft_summary(report: dict, artifact: Path) -> dict:
@@ -276,30 +245,14 @@ def _graft_summary(report: dict, artifact: Path) -> dict:
 def _reconciliation_summary(report: dict, artifact: Path) -> dict:
     compiler = report.get("compiler") or {}
     return {
-        "schema": report.get("schema"),
-        "artifact": str(artifact),
-        "fingerprint": report.get("fingerprint"),
-        "status": report.get("status"),
-        "produced_units": compiler.get("produced_units"),
-        "rejected_units": compiler.get("rejected_units"),
-        "divergences": len(report.get("divergences") or []),
-        "grants_execution_authority": False,
-        "implements_plan": False,
-        "change_authority": "not-determined",
+        "schema": report.get("schema"), "artifact": str(artifact), "fingerprint": report.get("fingerprint"),
+        "status": report.get("status"), "produced_units": compiler.get("produced_units"),
+        "rejected_units": compiler.get("rejected_units"), "divergences": len(report.get("divergences") or []),
+        "grants_execution_authority": False, "implements_plan": False, "change_authority": "not-determined",
     }
 
 
-def stack(
-    catalog: Path,
-    keys: list[str],
-    *,
-    name: str,
-    out: Path,
-    work: Path | None = None,
-    check: bool = False,
-    force: bool = False,
-) -> dict:
-    """Build a selected stack; importing produced code requires ``check=True``."""
+def stack(catalog: Path, keys: list[str], *, name: str, out: Path, work: Path | None = None, check: bool = False, force: bool = False) -> dict:
     plan_data = plan(catalog, keys)
     if plan_data["count"] == 0:
         raise StackError("selection is empty")
@@ -307,8 +260,7 @@ def stack(
     if gaps and not force:
         raise StackError(
             "plan has unresolved local deps "
-            f"(missing={len(plan_data.get('missing_local') or [])}, "
-            f"ambiguous={len(plan_data.get('ambiguous_local') or [])}); "
+            f"(missing={len(plan_data.get('missing_local') or [])}, ambiguous={len(plan_data.get('ambiguous_local') or [])}); "
             "fix seeds or pass force=True / --force"
         )
 
@@ -329,7 +281,7 @@ def stack(
         write_json(receipts_path, payload)
         write_json(work_path / "plan.json", plan_data)
 
-        graft_report = _graft_preflight(catalog, list(plan_data.get("seeds") or []))
+        graft_report, stock_graph_fingerprint = _graft_preflight(catalog, list(plan_data.get("seeds") or []))
         work_graft = work_path / "graft" / "impact.v1.json"
         write_json(work_graft, graft_report)
 
@@ -343,43 +295,57 @@ def stack(
         write_json(project_graft, graft_report)
 
         build_manifest = read_json(compile_dir / "build-manifest.json")
+        build_manifest_fingerprint = canonical_fingerprint(build_manifest)
         produced_contracts = read_json(out / "contracts.json")
         produced_dependencies = read_json(out / "dependencies.json")
-        reconciliation = build_reconciliation_report(
-            graft_report,
-            build_manifest,
-            produced_contracts,
-            produced_dependencies,
-        )
+        reconciliation = build_reconciliation_report(graft_report, build_manifest, produced_contracts, produced_dependencies)
+        reconciliation["evidence_chain"] = {
+            "stock_graph_fingerprint": stock_graph_fingerprint,
+            "impact_fingerprint": graft_report.get("fingerprint"),
+            "build_manifest_fingerprint": build_manifest_fingerprint,
+        }
+        stamp_fingerprint(reconciliation)
         reconciliation_path = out / ".receipt" / "graft" / "build-reconciliation.v1.json"
         write_json(reconciliation_path, reconciliation)
 
         roster = check_project(out) if check else None
+        runtime_report = None
+        runtime_path = out / ".receipt" / "graft" / "runtime-reconciliation.v1.json"
+        if roster is not None:
+            runtime_report = build_runtime_reconciliation(
+                impact_report=graft_report,
+                build_reconciliation=reconciliation,
+                roster=roster,
+                build_manifest_fingerprint=build_manifest_fingerprint,
+                stock_graph_fingerprint=stock_graph_fingerprint,
+            )
+            write_json(runtime_path, runtime_report)
 
         return {
             "plan": plan_data,
             "graft_preflight": _graft_summary(graft_report, project_graft),
             "graft_reconciliation": _reconciliation_summary(reconciliation, reconciliation_path),
+            "runtime_reconciliation": (
+                {
+                    "schema": runtime_report.get("schema"), "artifact": str(runtime_path),
+                    "fingerprint": runtime_report.get("fingerprint"), "status": runtime_report.get("status"),
+                    "contradictions": len(runtime_report.get("contradictions") or []),
+                    "grants_execution_authority": False,
+                }
+                if runtime_report else None
+            ),
             "project": project.get("project") if isinstance(project, dict) else str(out),
             "package": meta.get("package"),
             "compiled_units": len(meta.get("units") or []),
             "compile_errors": meta.get("errors") or [],
-            "execution": {
-                "requested": bool(check),
-                "performed": roster is not None,
-                "boundary": "explicit",
-            },
+            "execution": {"requested": bool(check), "performed": roster is not None, "boundary": "explicit"},
             "roster": (
                 {
-                    "ready": roster.get("ready"),
-                    "ok": len(roster.get("ok") or []),
-                    "import_error": len(roster.get("import_error") or []),
-                    "missing_local": len(roster.get("missing_local") or []),
-                    "accounted": roster.get("accounted"),
-                    "local_graph_ok": roster.get("local_graph_ok"),
+                    "ready": roster.get("ready"), "ok": len(roster.get("ok") or []),
+                    "import_error": len(roster.get("import_error") or []), "missing_local": len(roster.get("missing_local") or []),
+                    "accounted": roster.get("accounted"), "local_graph_ok": roster.get("local_graph_ok"),
                 }
-                if roster
-                else None
+                if roster else None
             ),
         }
     finally:
