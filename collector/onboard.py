@@ -1,4 +1,4 @@
-"""Onboard a .py unit: strip shelf noise; extract contracts + deps (do not delete APIs)."""
+"""Onboard a .py unit: strip shelf noise; extract contracts + deps + topology (do not delete APIs)."""
 
 from __future__ import annotations
 
@@ -87,10 +87,23 @@ def strip_for_shelf(source: str) -> str | None:
 
 
 def extract_contracts(info: dict) -> dict:
-    """Lift contracts from inspect output — do not remove them from source."""
+    """Lift source-backed public contracts from inspect output."""
     return {
         "classes": list(info.get("classes") or []),
         "functions": list(info.get("functions") or []),
+    }
+
+
+def extract_topology(info: dict) -> dict:
+    """Lift syntactic behavioral facts without assigning application meaning."""
+    raw = info.get("topology") if isinstance(info.get("topology"), dict) else {}
+    return {
+        "import_bindings": list(raw.get("import_bindings") or []),
+        "calls": list(raw.get("calls") or []),
+        "inheritance": list(raw.get("inheritance") or []),
+        "dynamic_imports": list(raw.get("dynamic_imports") or []),
+        "environment_reads": list(raw.get("environment_reads") or []),
+        "effects": list(raw.get("effects") or []),
     }
 
 
@@ -147,12 +160,7 @@ def tops_from_rels(rels: list[str]) -> set[str]:
 
 
 def modules_from_rels(rels: list[str]) -> set[str]:
-    """Return plausible importable module names for collected Python paths.
-
-    Preserve the literal repository-relative module path, while also recognizing
-    conventional source containers such as ``src/`` and ``lib/`` as layout
-    directories rather than import-package names.
-    """
+    """Return plausible importable module names for collected Python paths."""
     modules: set[str] = set()
     for rel in rels:
         parts = list(PurePosixPath(rel).parts)
@@ -186,6 +194,7 @@ def onboard_source(
 ) -> dict:
     info = inspect_source(source)
     contracts = extract_contracts(info)
+    topology = extract_topology(info)
     dependencies = extract_dependencies(
         info.get("imports") or [],
         tops,
@@ -197,6 +206,7 @@ def onboard_source(
         **info,
         "contracts": contracts,
         "dependencies": dependencies,
+        "topology": topology,
         "stripped": stripped,
         "normalization_transforms": _normalization_transforms(source, info),
         "ownership_stripped": bool(info.get("has_main") or owner_noise),
