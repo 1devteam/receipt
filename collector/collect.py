@@ -133,6 +133,7 @@ def _collect_local(root: Path) -> dict:
                 "imports": info["imports"],
                 "contracts": info["contracts"],
                 "dependencies": info["dependencies"],
+                "topology": info["topology"],
                 "raw_bytes": raw_bytes,
                 "stripped": normalized,
             }
@@ -144,7 +145,7 @@ def _collect_local(root: Path) -> dict:
         "onboard": {
             "preserve": ["raw_source"],
             "normalize": ["ast_unparse", "remove_main_guard", "remove_ownership_metadata"],
-            "extract": ["contracts", "dependencies"],
+            "extract": ["contracts", "dependencies", "topology"],
             "keep_in_normalized_source": ["apis", "imports"],
         },
         "files": files,
@@ -205,13 +206,14 @@ def _prune_unreferenced(catalog_dir: Path, files: list[dict]) -> None:
         "normalized": normalized_keep,
         "contracts": source_keep,
         "dependencies": source_keep,
+        "topology": source_keep,
         "copies": source_keep,
     }
     for sub, keep in keep_by_folder.items():
         folder = catalog_dir / sub
         if not folder.is_dir():
             continue
-        glob = "*.json" if sub in {"contracts", "dependencies"} else "*.py"
+        glob = "*.json" if sub in {"contracts", "dependencies", "topology"} else "*.py"
         for path in folder.glob(glob):
             if path.stem not in keep:
                 path.unlink(missing_ok=True)
@@ -299,10 +301,6 @@ def collect_to(
             "unchanged": 0,
         }
 
-    # Provenance persistence is unconditional: both catalog-directory and direct
-    # receipts.json outputs preserve exact raw bytes and normalized compile input.
-    persist_copies = True
-
     raw_dir = catalog_dir / "raw"
     normalized_dir = catalog_dir / "normalized"
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -310,11 +308,14 @@ def collect_to(
     if catalog_mode:
         contracts_dir = catalog_dir / "contracts"
         deps_dir = catalog_dir / "dependencies"
+        topology_dir = catalog_dir / "topology"
         contracts_dir.mkdir(parents=True, exist_ok=True)
         deps_dir.mkdir(parents=True, exist_ok=True)
+        topology_dir.mkdir(parents=True, exist_ok=True)
     else:
         contracts_dir = None
         deps_dir = None
+        topology_dir = None
 
     for rec in data["files"]:
         source_sha = rec["source_sha256"]
@@ -326,6 +327,7 @@ def collect_to(
         if catalog_mode:
             write_json(contracts_dir / f"{source_sha}.json", rec.get("contracts") or {})
             write_json(deps_dir / f"{source_sha}.json", rec.get("dependencies") or {})
+            write_json(topology_dir / f"{source_sha}.json", rec.get("topology") or {})
 
     if catalog_mode:
         write_json(catalog_dir / "index.json", _index(data["files"]))
@@ -344,6 +346,7 @@ def collect_to(
         if catalog_mode:
             item["contracts_path"] = f"contracts/{source_sha}.json"
             item["dependencies_path"] = f"dependencies/{source_sha}.json"
+            item["topology_path"] = f"topology/{source_sha}.json"
         stored.append(item)
 
     payload = {**data, "files": stored}
