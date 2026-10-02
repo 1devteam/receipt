@@ -1,0 +1,49 @@
+name: real-stock-graft-trial
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  trial:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        stock:
+          - label: pallets-click
+            repo: https://github.com/pallets/click.git
+            sha: 06b2a678741131fd577ce170e23e5ca0aeba0309
+          - label: psf-requests
+            repo: https://github.com/psf/requests.git
+            sha: 611c6162cbc4ac2020a2f91c7cfa4f3abf9bbb60
+          - label: python-attrs
+            repo: https://github.com/python-attrs/attrs.git
+            sha: a602f78ff670f22be90fb8aea501a6cc30e10fdd
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Receipt
+        run: python -m pip install -e '.[dev]'
+      - name: Fetch pinned stock
+        env:
+          STOCK_REPO: ${{ matrix.stock.repo }}
+          STOCK_SHA: ${{ matrix.stock.sha }}
+        run: |
+          rm -rf /tmp/receipt-real-stock
+          mkdir -p /tmp/receipt-real-stock
+          git -C /tmp/receipt-real-stock init
+          git -C /tmp/receipt-real-stock remote add origin "$STOCK_REPO"
+          git -C /tmp/receipt-real-stock fetch --depth 1 origin "$STOCK_SHA"
+          git -C /tmp/receipt-real-stock checkout --detach FETCH_HEAD
+      - name: Run Receipt real-stock trial
+        env:
+          STOCK_LABEL: ${{ matrix.stock.label }}
+          STOCK_SHA: ${{ matrix.stock.sha }}
+        run: |
+          python scripts/validation/real_stock_trial.py /tmp/receipt-real-stock \
+            --label "$STOCK_LABEL" \
+            --commit "$STOCK_SHA" \
+            --out "/tmp/receipt-trial-$STOCK_LABEL"
