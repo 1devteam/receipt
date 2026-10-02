@@ -23,8 +23,14 @@ def _externals(dependencies: dict) -> list[str]:
     return sorted(found)
 
 
-def _validate_staging(compile_dir: Path) -> tuple[dict, dict, dict, dict]:
-    required = ("meta.json", "contracts.json", "dependencies.json", "receipts.json")
+def _validate_staging(compile_dir: Path) -> tuple[dict, dict, dict, dict, dict]:
+    required = (
+        "meta.json",
+        "contracts.json",
+        "dependencies.json",
+        "receipts.json",
+        "build-manifest.json",
+    )
     for name in required:
         path = compile_dir / name
         if not path.is_file():
@@ -35,11 +41,14 @@ def _validate_staging(compile_dir: Path) -> tuple[dict, dict, dict, dict]:
         contracts = read_json(compile_dir / "contracts.json")
         dependencies = read_json(compile_dir / "dependencies.json")
         receipts = read_json(compile_dir / "receipts.json")
+        build_manifest = read_json(compile_dir / "build-manifest.json")
     except ReceiptIOError as exc:
         raise ProduceError(str(exc)) from exc
 
     if not isinstance(meta, dict) or "package" not in meta:
         raise ProduceError(f"meta.json missing package: {compile_dir / 'meta.json'}")
+    if not isinstance(build_manifest, dict) or build_manifest.get("schema") != "receipt.compiler.build.v1":
+        raise ProduceError(f"invalid build-manifest.json: {compile_dir / 'build-manifest.json'}")
     units = meta.get("units")
     if not isinstance(units, list) or not units:
         raise ProduceError(f"meta.json has no units: {compile_dir / 'meta.json'}")
@@ -55,13 +64,13 @@ def _validate_staging(compile_dir: Path) -> tuple[dict, dict, dict, dict]:
         if not src.is_file():
             raise ProduceError(f"missing module source: {src}")
 
-    return meta, contracts, dependencies, receipts
+    return meta, contracts, dependencies, receipts, build_manifest
 
 
 def produce(compile_dir: Path, out: Path) -> dict:
     compile_dir = Path(compile_dir).resolve()
     out = Path(out).resolve()
-    meta, contracts, dependencies, receipts = _validate_staging(compile_dir)
+    meta, contracts, dependencies, receipts, build_manifest = _validate_staging(compile_dir)
 
     package = meta["package"]
     src_pkg = out / "src" / package
@@ -103,6 +112,9 @@ def produce(compile_dir: Path, out: Path) -> dict:
     write_json(out / "dependencies.json", dependencies)
     write_json(out / "structure.json", structure)
     write_json(out / "receipts.json", receipts)
+    compiler_evidence = out / ".receipt" / "compiler"
+    compiler_evidence.mkdir(parents=True, exist_ok=True)
+    write_json(compiler_evidence / "build-manifest.v1.json", build_manifest)
     (out / "requirements.txt").write_text(
         "".join(f"{n}\n" for n in reqs) if reqs else "# no third-party imports detected\n",
         encoding="utf-8",
