@@ -29,16 +29,22 @@ jobs:
         run: |
           rm -rf /tmp/receipt-stock-bootstrap
           receipt stock bootstrap -o /tmp/receipt-stock-bootstrap
-      - name: Verify inventory
+      - name: Verify inventory and federated discovery
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
+          from receipt_stock.query import find_units
 
           root = Path('/tmp/receipt-stock-bootstrap')
           data = json.loads((root / 'stock-index.v1.json').read_text())
+          units = json.loads((root / 'stock-units.v1.json').read_text())
           assert data['schema'] == 'receipt.stock.index.v1'
+          assert units['schema'] == 'receipt.stock.units.v1'
           assert len(data['sources']) == 11
+          assert data['totals']['files'] == units['counts']['units']
+          assert data['unit_index']['units'] == units['counts']['units']
+          assert data['unit_index']['fingerprint'] == units['fingerprint']
           assert data['totals']['files'] > 55
           assert data['totals']['accepted'] + data['totals']['constrained'] > 0
           assert data['totals']['rejected'] == 0
@@ -53,6 +59,10 @@ jobs:
               assert source['stock_graph_fingerprint']
               assert Path(source['catalog'], 'receipts.json').is_file()
               assert Path(source['catalog'], 'admission.v1.json').is_file()
+          assert find_units(root, capabilities=['web-api'])
+          assert find_units(root, capabilities=['database', 'orm'])
+          assert find_units(root, capabilities=['ai-client', 'tool-interfaces'])
+          assert find_units(root, query='AsyncClient')
           print(json.dumps(data['totals'], indent=2))
-          print(json.dumps(data['capability_tags'], indent=2))
+          print(json.dumps(units['counts'], indent=2))
           PY
