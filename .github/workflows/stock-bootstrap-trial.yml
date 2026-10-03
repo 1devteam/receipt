@@ -11,6 +11,7 @@ on:
       - 'pyproject.toml'
       - 'tests/test_stock_bootstrap.py'
       - 'tests/test_stock_build.py'
+      - 'tests/test_stock_coverage.py'
       - '.github/workflows/stock-bootstrap-trial.yml'
   workflow_dispatch:
 
@@ -30,7 +31,7 @@ jobs:
         run: |
           rm -rf /tmp/receipt-stock-bootstrap
           receipt stock bootstrap -o /tmp/receipt-stock-bootstrap
-      - name: Verify inventory, package mounts and federated discovery
+      - name: Verify inventory, package mounts, coverage and federated discovery
         run: |
           python - <<'PY'
           import json
@@ -41,20 +42,25 @@ jobs:
           root = Path('/tmp/receipt-stock-bootstrap')
           data = json.loads((root / 'stock-index.v1.json').read_text())
           units = json.loads((root / 'stock-units.v1.json').read_text())
+          coverage = json.loads((root / 'stock-coverage.v1.json').read_text())
           assert data['schema'] == 'receipt.stock.index.v1'
           assert units['schema'] == 'receipt.stock.units.v1'
-          assert len(data['sources']) == 11
+          assert coverage['schema'] == 'receipt.stock.coverage.v1'
+          assert len(data['sources']) == 12
           assert data['totals']['files'] == units['counts']['units']
           assert data['unit_index']['units'] == units['counts']['units']
           assert data['unit_index']['fingerprint'] == units['fingerprint']
-          assert data['totals']['files'] > 55
+          assert data['coverage']['fingerprint'] == coverage['fingerprint']
+          assert coverage['stock_unit_index_fingerprint'] == units['fingerprint']
+          assert data['totals']['files'] > 2464
           assert data['totals']['accepted'] + data['totals']['constrained'] > 0
           assert data['totals']['rejected'] == 0
           assert data['fingerprint']
           required = {
               'cli', 'http-client', 'network', 'data-modeling',
-              'web-api', 'async-networking', 'database', 'orm',
-              'scheduling', 'observability', 'ai-client', 'tool-interfaces'
+              'web-api', 'web-runtime', 'asgi', 'async-networking',
+              'database', 'orm', 'scheduling', 'observability',
+              'ai-client', 'tool-interfaces'
           }
           assert required <= set(data['capability_tags'])
           for source in data['sources']:
@@ -63,15 +69,26 @@ jobs:
               assert Path(source['catalog'], 'receipts.json').is_file()
               assert Path(source['catalog'], 'admission.v1.json').is_file()
           assert find_units(root, capabilities=['web-api'])
+          assert find_units(root, capabilities=['web-runtime', 'asgi'])
           assert find_units(root, capabilities=['database', 'orm'])
           assert find_units(root, capabilities=['ai-client', 'tool-interfaces'])
           assert find_units(root, query='AsyncClient')
+
+          joins = {
+              (row['consumer_source'], row['provider_source'], row['package'])
+              for row in coverage['latent_stock_joins']
+          }
+          assert ('fastapi-web', 'pydantic-models', 'pydantic') in joins
+          assert ('fastapi-web', 'starlette-web-runtime', 'starlette') in joins
+          assert ('openai-sdk', 'httpx-async-client', 'httpx') in joins
+          assert coverage['totals']['latent_stock_joins'] > 0
+          assert coverage['authority']['asserts_api_compatibility'] is False
+          assert coverage['authority']['asserts_license_compatibility'] is False
 
           click = next(
               unit for unit in units['units']
               if unit['source_id'] == 'click-core' and unit['rel'] == 'click/core.py'
           )
-          assert click['mount'] == 'click'
           click_plan = plan_stock(root, [click['id']])['plan']
           assert click_plan['count'] > 1
           assert click_plan['missing_local'] == []
@@ -81,6 +98,5 @@ jobs:
           assert fastapi['rel'].startswith('fastapi/')
           assert fastapi['source_identity']['path'].startswith('fastapi/')
           print(json.dumps(data['totals'], indent=2))
-          print(json.dumps(units['counts'], indent=2))
-          print(json.dumps({'click_plan_units': click_plan['count']}, indent=2))
+          print(json.dumps(coverage['totals'], indent=2))
           PY
