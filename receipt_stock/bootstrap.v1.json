@@ -66,6 +66,30 @@
       "capabilities": ["http-client", "async-networking", "network", "streaming", "authentication"]
     },
     {
+      "id": "httpx2-client",
+      "repository": "pydantic/httpx2",
+      "commit": "0286b404fb72391c615e2f8d1b48b35eee76c297",
+      "subpath": "src/httpx2/httpx2",
+      "license": "BSD-3-Clause",
+      "capabilities": ["http-client", "async-networking", "network", "streaming", "authentication", "http2"]
+    },
+    {
+      "id": "httpcore2-transport",
+      "repository": "pydantic/httpx2",
+      "commit": "0286b404fb72391c615e2f8d1b48b35eee76c297",
+      "subpath": "src/httpcore2/httpcore2",
+      "license": "BSD-3-Clause",
+      "capabilities": ["transport", "async-networking", "network", "connection-pooling", "http1", "http2"]
+    },
+    {
+      "id": "anyio-runtime",
+      "repository": "agronholm/anyio",
+      "commit": "818e4ac441fa27e9fac893496fc5a4fbe0a58689",
+      "subpath": "src/anyio",
+      "license": "MIT",
+      "capabilities": ["async-runtime", "concurrency", "network", "task-groups", "cancellation", "streams"]
+    },
+    {
       "id": "sqlalchemy-core",
       "repository": "sqlalchemy/sqlalchemy",
       "commit": "3e4da2348053a45e5459e2660c493b22a4965e78",
