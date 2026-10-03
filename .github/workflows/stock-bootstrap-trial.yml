@@ -47,44 +47,41 @@ jobs:
           assert data['schema'] == 'receipt.stock.index.v1'
           assert units['schema'] == 'receipt.stock.units.v1'
           assert coverage['schema'] == 'receipt.stock.coverage.v1'
-          assert len(data['sources']) == 29
+          assert len(data['sources']) == 30
           assert data['totals']['files'] == units['counts']['units']
           assert data['unit_index']['units'] == units['counts']['units']
           assert data['unit_index']['fingerprint'] == units['fingerprint']
           assert data['coverage']['fingerprint'] == coverage['fingerprint']
           assert coverage['stock_unit_index_fingerprint'] == units['fingerprint']
-          assert data['totals']['files'] > 2875
+          assert data['totals']['files'] > 2891
           assert data['totals']['rejected'] == 0
-          assert {'result-container', 'header-compression', 'framing'} <= set(data['capability_tags'])
+          assert {'observability', 'tracing', 'metrics', 'propagation'} <= set(data['capability_tags'])
 
           joins = {
               (row['consumer_source'], row['provider_source'], row['package'])
               for row in coverage['latent_stock_joins']
           }
-          assert ('trio-runtime', 'outcome-runtime', 'outcome') in joins
-          assert ('anyio-runtime', 'outcome-runtime', 'outcome') in joins
-          assert ('h2-protocol', 'hpack-protocol', 'hpack') in joins
-          assert ('h2-protocol', 'hyperframe-protocol', 'hyperframe') in joins
+          assert ('fastapi-web', 'opentelemetry-api', 'opentelemetry') in joins
+          assert ('starlette-web-runtime', 'opentelemetry-api', 'opentelemetry') in joins
 
           uncovered = {row['package'] for row in coverage['uncovered_external_packages']}
-          assert 'outcome' not in uncovered
-          assert 'hpack' not in uncovered
-          assert 'hyperframe' not in uncovered
-          assert coverage['totals']['latent_stock_joins'] > 68
+          assert 'opentelemetry' not in uncovered
+          assert coverage['totals']['latent_stock_joins'] > 75
           assert coverage['authority']['asserts_api_compatibility'] is False
+          assert coverage['authority']['asserts_version_compatibility'] is False
           assert coverage['authority']['asserts_license_compatibility'] is False
+          assert coverage['authority']['grants_execution_authority'] is False
 
           click = next(unit for unit in units['units'] if unit['source_id'] == 'click-core' and unit['rel'] == 'click/core.py')
           click_plan = plan_stock(root, [click['id']])['plan']
           assert click_plan['missing_local'] == []
           assert click_plan['ambiguous_local'] == []
 
-          target_providers = {'outcome-runtime', 'hpack-protocol', 'hyperframe-protocol'}
           target_joins = [
               row for row in coverage['latent_stock_joins']
-              if row['provider_source'] in target_providers
+              if row['provider_source'] == 'opentelemetry-api'
           ]
-          target_joins.sort(key=lambda row: (row['provider_source'], row['consumer_source'], row['package']))
+          target_joins.sort(key=lambda row: (row['consumer_source'], row['package']))
           print(json.dumps(data['totals'], indent=2))
           print(json.dumps(coverage['totals'], indent=2))
           print('TARGET_PROVIDER_JOINS')
