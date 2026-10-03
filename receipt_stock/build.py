@@ -7,6 +7,7 @@ from common.io import write_json
 from receipt_cli.stack import plan as stack_plan
 from receipt_cli.stack import stack as stack_build
 from receipt_graft.evidence import canonical_fingerprint
+from receipt_stock.composite import materialize_composite
 from receipt_stock.query import load_unit_index
 
 STOCK_SELECTION_SCHEMA = "receipt.stock.selection.v1"
@@ -40,20 +41,17 @@ def _resolve_units(stock_root: Path | str, unit_ids: Iterable[str]) -> tuple[dic
         if unit_id not in seen:
             seen.add(unit_id)
             selected.append(unit)
-
-    sources = {str(unit.get("source_id") or "") for unit in selected}
-    if "" in sources:
-        raise StockBuildError("selected stock unit is missing source_id")
-    if len(sources) != 1:
-        raise StockBuildError(
-            "cross-source compilation is not admitted yet; select units from one proven source catalog "
-            f"or build separate stacks. selected sources: {sorted(sources)}"
-        )
     return index, selected
 
 
-def _selection(index: dict[str, Any], selected: list[dict[str, Any]], plan_data: dict[str, Any]) -> dict[str, Any]:
-    source_id = str(selected[0].get("source_id") or "")
+def _selection(
+    index: dict[str, Any],
+    selected: list[dict[str, Any]],
+    plan_data: dict[str, Any],
+    *,
+    composite: dict[str, Any] | None,
+) -> dict[str, Any]:
+    source_ids = sorted({str(unit.get("source_id") or "") for unit in selected})
     units = [
         {
             "id": unit.get("id"),
@@ -78,14 +76,16 @@ def _selection(index: dict[str, Any], selected: list[dict[str, Any]], plan_data:
     artifact: dict[str, Any] = {
         "schema": STOCK_SELECTION_SCHEMA,
         "purpose": (
-            "Bind an explicit federated-stock selection to the exact source catalog and "
-            "existing Receipt stack plan that will compile it."
+            "Bind explicit federated-stock selections to the exact source or composite "
+            "catalog and existing Receipt stack plan that will compile them."
         ),
         "stock_index_fingerprint": index.get("fingerprint"),
-        "source_id": source_id,
-        "repository": selected[0].get("repository"),
-        "commit": selected[0].get("commit"),
-        "mount": selected[0].get("mount"),
+        "source_ids": source_ids,
+        "repositories": sorted({str(unit.get("repository") or "") for unit in selected}),
+        "commits": sorted({str(unit.get("commit") or "") for unit in selected}),
+        "mounts": sorted({str(unit.get("mount") or "") for unit in selected}),
+        "licenses": sorted({str(unit.get("license") or "") for unit in selected}),
+        "license_compatibility_not_determined": len(source_ids) > 1,
         "selected_units": units,
         "requested_rels": sorted(str(unit.get("rel") or "") for unit in selected),
         "resolved_plan": {
@@ -96,8 +96,19 @@ def _selection(index: dict[str, Any], selected: list[dict[str, Any]], plan_data:
             "ambiguous_local": list(plan_data.get("ambiguous_local") or []),
             "external": list(plan_data.get("external") or []),
         },
+        "composite": (
+            {
+                "schema": composite.get("schema"),
+                "fingerprint": composite.get("fingerprint"),
+                "source_ids": composite.get("source_ids"),
+                "units": composite.get("units"),
+                "cross_source_local_edge_count": composite.get("cross_source_local_edge_count"),
+            }
+            if composite
+            else None
+        ),
         "compiler": "receipt_cli.stack",
-        "cross_source_compilation": False,
+        "cross_source_compilation": bool(composite),
         "grants_execution_authority": False,
         "implements_plan": False,
         "change_authority": "not-determined",
@@ -109,17 +120,30 @@ def _selection(index: dict[str, Any], selected: list[dict[str, Any]], plan_data:
 def plan_stock(stock_root: Path | str, unit_ids: Iterable[str]) -> dict[str, Any]:
     root = Path(stock_root).expanduser().resolve()
     index, selected = _resolve_units(root, unit_ids)
-    source_id = str(selected[0]["source_id"])
-    catalog = root / "catalogs" / source_id
-    if not (catalog / "receipts.json").is_file():
-        raise StockBuildError(f"missing source catalog: {catalog}")
+    source_ids = sorted({str(unit.get("source_id") or "") for unit in selected})
+    if "" in source_ids:
+        raise StockBuildError("selected stock unit is missing source_id")
+
+    composite: dict[str, Any] | None = None
+    if len(source_ids) == 1:
+        catalog = root / "catalogs" / source_ids[0]
+        if not (catalog / "receipts.json").is_file():
+            raise StockBuildError(f"missing source catalog: {catalog}")
+    else:
+        catalog, composite = materialize_composite(
+            root,
+            source_ids,
+            stock_index_fingerprint=str(index.get("fingerprint") or ""),
+        )
+
     rels = [str(unit.get("rel") or "") for unit in selected]
     plan_data = stack_plan(catalog, rels)
-    selection = _selection(index, selected, plan_data)
+    selection = _selection(index, selected, plan_data, composite=composite)
     return {
         "stock_root": str(root),
         "catalog": str(catalog),
         "selection": selection,
+        "composite": composite,
         "plan": plan_data,
         "grants_execution_authority": False,
     }
@@ -137,6 +161,7 @@ def stack_stock(
 ) -> dict[str, Any]:
     planned = plan_stock(stock_root, unit_ids)
     selection = planned["selection"]
+    composite = planned.get("composite")
     plan_data = planned["plan"]
     catalog = Path(planned["catalog"])
     out_path = Path(out).expanduser().resolve()
@@ -151,18 +176,38 @@ def stack_stock(
         force=force,
     )
 
-    artifact = out_path / ".receipt" / "stock" / "selection.v1.json"
-    artifact.parent.mkdir(parents=True, exist_ok=True)
+    stock_dir = out_path / ".receipt" / "stock"
+    stock_dir.mkdir(parents=True, exist_ok=True)
+    artifact = stock_dir / "selection.v1.json"
     write_json(artifact, selection)
+    composite_path: Path | None = None
+    if isinstance(composite, dict):
+        composite_path = stock_dir / "composite.v1.json"
+        write_json(composite_path, composite)
+
     return {
         **result,
         "stock_selection": {
             "schema": selection.get("schema"),
             "artifact": str(artifact),
             "fingerprint": selection.get("fingerprint"),
-            "source_id": selection.get("source_id"),
-            "mount": selection.get("mount"),
+            "source_ids": selection.get("source_ids"),
+            "cross_source_compilation": selection.get("cross_source_compilation"),
             "selected_units": len(selection.get("selected_units") or []),
             "grants_execution_authority": False,
         },
+        "stock_composite": (
+            {
+                "schema": composite.get("schema"),
+                "artifact": str(composite_path),
+                "fingerprint": composite.get("fingerprint"),
+                "source_ids": composite.get("source_ids"),
+                "units": composite.get("units"),
+                "cross_source_local_edge_count": composite.get("cross_source_local_edge_count"),
+                "license_compatibility_not_determined": True,
+                "grants_execution_authority": False,
+            }
+            if isinstance(composite, dict)
+            else None
+        ),
     }
