@@ -80,7 +80,9 @@ jobs:
           }
           assert ('fastapi-web', 'pydantic-models', 'pydantic') in joins
           assert ('fastapi-web', 'starlette-web-runtime', 'starlette') in joins
-          assert ('openai-sdk', 'httpx-async-client', 'httpx') in joins
+          assert ('openai-sdk', 'pydantic-models', 'pydantic') in joins
+          uncovered = {row['package'] for row in coverage['uncovered_external_packages']}
+          assert 'httpx2' in uncovered
           assert coverage['totals']['latent_stock_joins'] > 0
           assert coverage['authority']['asserts_api_compatibility'] is False
           assert coverage['authority']['asserts_license_compatibility'] is False
