@@ -8,17 +8,21 @@ from common.io import write_json
 
 
 class StockMountError(ValueError):
-    """Invalid stock package mount or catalog evidence."""
+    """Invalid stock package/module mount or catalog evidence."""
 
 
-def _mounted_rel(mount: str, rel: str) -> str:
+def _mounted_rel(mount: str, rel: str, *, mount_kind: str) -> str:
     rel = str(PurePosixPath(rel))
+    if mount_kind == "module":
+        return f"{mount}.py"
     if rel == mount or rel.startswith(mount + "/"):
         return rel
     return str(PurePosixPath(mount) / rel)
 
 
-def _repo_path(subpath: str, original_rel: str) -> str:
+def _repo_path(subpath: str, original_rel: str, *, mount_kind: str) -> str:
+    if mount_kind == "module":
+        return str(PurePosixPath(subpath))
     base = PurePosixPath(subpath)
     rel = PurePosixPath(original_rel)
     if str(rel) == str(base) or str(rel).startswith(str(base) + "/"):
@@ -43,11 +47,7 @@ def _symbol_index(files: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]
                 names.append(str(fn["name"]))
         for name in names:
             symbols.setdefault(name, []).append(
-                {
-                    "rel": rec.get("rel"),
-                    "sha256": rec.get("sha256"),
-                    "origin": rec.get("abs"),
-                }
+                {"rel": rec.get("rel"), "sha256": rec.get("sha256"), "origin": rec.get("abs")}
             )
     return symbols
 
@@ -57,25 +57,37 @@ def mount_catalog_payload(
     catalog: Path | str,
     source: dict[str, Any],
 ) -> dict[str, Any]:
-    """Restore a source package root after GitHub subpath collection.
+    """Restore a source import root after GitHub subpath collection.
 
-    GitHub subpath collection intentionally scans the selected directory as its root.
-    Curated stock, however, must retain the package's import identity so absolute
-    imports such as ``fastapi.routing`` or ``requests.sessions`` remain local graph
-    edges instead of being misclassified as third-party dependencies.
+    Package sources are mounted below their logical package directory. Single-module
+    sources are mounted directly as ``<module>.py`` so modules such as
+    ``typing_extensions`` retain the same import identity they have when installed.
     """
     catalog = Path(catalog).expanduser().resolve()
     mount = str(source.get("mount") or "").strip().strip("/")
+    mount_kind = str(source.get("mount_kind") or "package").strip()
     subpath = str(source.get("subpath") or "").strip().strip("/")
     if not mount:
-        raise StockMountError(f"stock source has no package mount: {source.get('id')}")
+        raise StockMountError(f"stock source has no import mount: {source.get('id')}")
+    if mount_kind not in {"package", "module"}:
+        raise StockMountError(f"unsupported stock mount kind: {mount_kind}")
 
     files = [rec for rec in payload.get("files") or [] if isinstance(rec, dict)]
+    if mount_kind == "module" and len(files) != 1:
+        raise StockMountError(
+            f"single-module stock source must collect exactly one Python file: {source.get('id')}"
+        )
     rel_map = {
-        str(rec.get("rel") or ""): _mounted_rel(mount, str(rec.get("rel") or ""))
+        str(rec.get("rel") or ""): _mounted_rel(
+            mount,
+            str(rec.get("rel") or ""),
+            mount_kind=mount_kind,
+        )
         for rec in files
         if rec.get("rel")
     }
+    if len(set(rel_map.values())) != len(rel_map):
+        raise StockMountError(f"stock mount creates duplicate logical paths: {source.get('id')}")
     mounted_rels = list(rel_map.values())
     tops = tops_from_rels(mounted_rels)
     local_modules = modules_from_rels(mounted_rels)
@@ -99,8 +111,6 @@ def mount_catalog_payload(
             item["imports"] = info.get("imports") or []
             item["dependencies"] = info.get("dependencies") or {}
             item["topology"] = info.get("topology") or {}
-            # Public contracts should be invariant across mounting, but use the
-            # re-observed normalized source as the authoritative mounted projection.
             item["contracts"] = info.get("contracts") or item.get("contracts") or {}
             item["classes"] = info.get("classes") or item.get("classes") or []
             item["functions"] = info.get("functions") or item.get("functions") or []
@@ -109,7 +119,11 @@ def mount_catalog_payload(
         if isinstance(identity, dict):
             updated_identity = dict(identity)
             if updated_identity.get("kind") == "github":
-                updated_identity["path"] = _repo_path(subpath, original_rel)
+                updated_identity["path"] = _repo_path(
+                    subpath,
+                    original_rel,
+                    mount_kind=mount_kind,
+                )
             else:
                 updated_identity["path"] = item["rel"]
             item["source_identity"] = updated_identity
@@ -129,6 +143,7 @@ def mount_catalog_payload(
         **payload,
         "stock_mount": {
             "logical_root": mount,
+            "kind": mount_kind,
             "source_subpath": subpath,
             "preserves_import_identity": True,
         },

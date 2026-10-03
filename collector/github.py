@@ -151,11 +151,13 @@ def _parse_slug(raw: str, *, override_ref: str | None) -> GitHubSpec:
     owner, repo, *rest = parts
     repo = _clean_repo(repo)
     extra = "/".join(rest) or None
+    selected = subpath or extra
     return GitHubSpec(
         owner=owner,
         repo=repo,
         ref=override_ref or found_ref,
-        subpath=subpath or extra,
+        subpath=selected,
+        kind="blob" if selected and selected.endswith(".py") else "tree",
     )
 
 
@@ -179,6 +181,8 @@ def _parse_url_path(path: str, *, override_ref: str | None) -> GitHubSpec:
                     subpath = "/".join(extra[2:])
         elif head not in {"archive", "releases", "issues", "pull", "actions", "wiki"}:
             subpath = "/".join(extra)
+            if subpath.endswith(".py"):
+                kind = "blob"
     return GitHubSpec(
         owner=owner,
         repo=repo,

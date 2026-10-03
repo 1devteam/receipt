@@ -18,11 +18,7 @@ STOCK_INDEX_SCHEMA = "receipt.stock.index.v1"
 Collector = Callable[..., dict[str, Any]]
 
 
-def _annotate_payload(
-    payload: dict[str, Any],
-    admission_report: dict[str, Any],
-    source: dict[str, Any],
-) -> dict[str, Any]:
+def _annotate_payload(payload: dict[str, Any], admission_report: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
     by_sha = {
         row.get("source_sha256"): row.get("admission")
         for row in admission_report.get("files") or []
@@ -38,6 +34,7 @@ def _annotate_payload(
             "commit": source["commit"],
             "subpath": source["subpath"],
             "mount": source["mount"],
+            "mount_kind": source["mount_kind"],
             "license": source["license"],
             "source_capabilities": list(source["capabilities"]),
             "admission": admission,
@@ -46,13 +43,7 @@ def _annotate_payload(
     return {**payload, "files": enriched}
 
 
-def bootstrap_stock(
-    out: Path | str,
-    *,
-    manifest_path: Path | str | None = None,
-    collector: Collector = collect_to,
-    force: bool = False,
-) -> dict[str, Any]:
+def bootstrap_stock(out: Path | str, *, manifest_path: Path | str | None = None, collector: Collector = collect_to, force: bool = False) -> dict[str, Any]:
     """Materialize curated pinned stock into independent Receipt catalogs."""
     manifest = load_bootstrap_manifest(manifest_path)
     out = Path(out).expanduser().resolve()
@@ -66,8 +57,7 @@ def bootstrap_stock(
     for source in manifest["sources"]:
         catalog = catalogs_root / source["id"]
         payload = collector(
-            github_spec(source),
-            catalog,
+            github_spec(source), catalog,
             force=force or not (catalog / "receipts.json").exists(),
             update=(catalog / "receipts.json").exists() and not force,
         )
@@ -79,14 +69,7 @@ def bootstrap_stock(
 
         graph = build_stock_graph(enriched)
         graph_fingerprint = canonical_fingerprint(graph)
-        admitted_tags = sorted(
-            {
-                tag
-                for row in admission.get("files") or []
-                if isinstance(row, dict)
-                for tag in ((row.get("admission") or {}).get("capability_tags") or [])
-            }
-        )
+        admitted_tags = sorted({tag for row in admission.get("files") or [] if isinstance(row, dict) for tag in ((row.get("admission") or {}).get("capability_tags") or [])})
         all_tags.update(admitted_tags)
         counts = admission["counts"]
         file_count = len(enriched.get("files") or [])
@@ -94,22 +77,13 @@ def bootstrap_stock(
         for key in ("accepted", "constrained", "rejected"):
             totals[key] += int(counts.get(key) or 0)
 
-        source_rows.append(
-            {
-                "id": source["id"],
-                "repository": source["repository"],
-                "commit": source["commit"],
-                "subpath": source["subpath"],
-                "mount": source["mount"],
-                "license": source["license"],
-                "declared_capabilities": list(source["capabilities"]),
-                "observed_capabilities": admitted_tags,
-                "catalog": str(catalog),
-                "files": file_count,
-                "admission": counts,
-                "stock_graph_fingerprint": graph_fingerprint,
-            }
-        )
+        source_rows.append({
+            "id": source["id"], "repository": source["repository"], "commit": source["commit"],
+            "subpath": source["subpath"], "mount": source["mount"], "mount_kind": source["mount_kind"],
+            "license": source["license"], "declared_capabilities": list(source["capabilities"]),
+            "observed_capabilities": admitted_tags, "catalog": str(catalog), "files": file_count,
+            "admission": counts, "stock_graph_fingerprint": graph_fingerprint,
+        })
 
     unit_index = write_unit_index(out, source_rows)
     coverage = write_stock_coverage(out)
@@ -117,27 +91,15 @@ def bootstrap_stock(
         "schema": STOCK_INDEX_SCHEMA,
         "manifest_schema": manifest["schema"],
         "manifest_fingerprint": canonical_fingerprint(manifest),
-        "purpose": (
-            "Reproducible Receipt stock inventory assembled from pinned, provenance-bound "
-            "Python sources and evaluated through deterministic admission gates."
-        ),
+        "purpose": "Reproducible Receipt stock inventory assembled from pinned, provenance-bound Python sources and evaluated through deterministic admission gates.",
         "sources": source_rows,
         "totals": totals,
         "capability_tags": sorted(all_tags),
-        "unit_index": {
-            "schema": unit_index["schema"],
-            "path": "stock-units.v1.json",
-            "units": unit_index.get("counts", {}).get("units", 0),
-            "fingerprint": unit_index.get("fingerprint"),
-        },
+        "unit_index": {"schema": unit_index["schema"], "path": "stock-units.v1.json", "units": unit_index.get("counts", {}).get("units", 0), "fingerprint": unit_index.get("fingerprint")},
         "coverage": {
-            "schema": coverage.get("schema"),
-            "path": "stock-coverage.v1.json",
-            "fingerprint": coverage.get("fingerprint"),
+            "schema": coverage.get("schema"), "path": "stock-coverage.v1.json", "fingerprint": coverage.get("fingerprint"),
             "latent_stock_joins": (coverage.get("totals") or {}).get("latent_stock_joins", 0),
-            "uncovered_external_packages": (coverage.get("totals") or {}).get(
-                "uncovered_external_packages", 0
-            ),
+            "uncovered_external_packages": (coverage.get("totals") or {}).get("uncovered_external_packages", 0),
         },
         "grants_execution_authority": False,
     }
