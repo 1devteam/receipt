@@ -8,6 +8,7 @@ from common.io import write_json
 from receipt_graft.evidence import canonical_fingerprint
 from receipt_graft.graph import build_stock_graph
 from receipt_stock.admission import evaluate_catalog
+from receipt_stock.coverage import write_stock_coverage
 from receipt_stock.manifest import github_spec, load_bootstrap_manifest
 from receipt_stock.mount import mount_catalog_payload
 from receipt_stock.query import write_unit_index
@@ -52,13 +53,7 @@ def bootstrap_stock(
     collector: Collector = collect_to,
     force: bool = False,
 ) -> dict[str, Any]:
-    """Materialize curated pinned stock into independent Receipt catalogs.
-
-    External source code is never vendored into the Receipt repository. The manifest
-    pins exact repository commits/subpaths; this function reconstructs durable
-    provenance-preserving catalogs, restores each source's logical import-package
-    root, then emits source inventory and a federated unit index.
-    """
+    """Materialize curated pinned stock into independent Receipt catalogs."""
     manifest = load_bootstrap_manifest(manifest_path)
     out = Path(out).expanduser().resolve()
     catalogs_root = out / "catalogs"
@@ -117,6 +112,7 @@ def bootstrap_stock(
         )
 
     unit_index = write_unit_index(out, source_rows)
+    coverage = write_stock_coverage(out)
     index: dict[str, Any] = {
         "schema": STOCK_INDEX_SCHEMA,
         "manifest_schema": manifest["schema"],
@@ -133,6 +129,15 @@ def bootstrap_stock(
             "path": "stock-units.v1.json",
             "units": unit_index.get("counts", {}).get("units", 0),
             "fingerprint": unit_index.get("fingerprint"),
+        },
+        "coverage": {
+            "schema": coverage.get("schema"),
+            "path": "stock-coverage.v1.json",
+            "fingerprint": coverage.get("fingerprint"),
+            "latent_stock_joins": (coverage.get("totals") or {}).get("latent_stock_joins", 0),
+            "uncovered_external_packages": (coverage.get("totals") or {}).get(
+                "uncovered_external_packages", 0
+            ),
         },
         "grants_execution_authority": False,
     }
