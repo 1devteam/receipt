@@ -13,6 +13,12 @@ class StockQueryError(ValueError):
     """Invalid or missing Receipt stock query data."""
 
 
+def _portable_identity(identity: dict[str, Any]) -> dict[str, Any]:
+    """Retain stable source identity while excluding machine-local origin data."""
+    keys = ("schema", "kind", "repository", "commit", "path", "source_sha256")
+    return {key: identity.get(key) for key in keys if key in identity}
+
+
 def _symbol_names(rec: dict[str, Any]) -> list[str]:
     contracts = rec.get("contracts") if isinstance(rec.get("contracts"), dict) else {}
     names: set[str] = set()
@@ -79,7 +85,7 @@ def build_unit_index(stock_root: Path | str, source_rows: Iterable[dict[str, Any
                     "rel": rel,
                     "source_sha256": sha,
                     "normalized_sha256": rec.get("normalized_sha256"),
-                    "source_identity": identity,
+                    "source_identity": _portable_identity(identity),
                     "decision": admission.get("decision"),
                     "score": admission.get("score"),
                     "capability_tags": tags,
@@ -113,6 +119,11 @@ def build_unit_index(stock_root: Path | str, source_rows: Iterable[dict[str, Any
             "units": len(units),
             "decisions": dict(sorted(decision_counts.items())),
             "capability_tags": dict(sorted(tag_counts.items())),
+        },
+        "security": {
+            "contains_machine_local_origin": False,
+            "contains_raw_source": False,
+            "contains_normalized_source": False,
         },
         "grants_execution_authority": False,
     }
