@@ -47,37 +47,30 @@ jobs:
           assert data['schema'] == 'receipt.stock.index.v1'
           assert units['schema'] == 'receipt.stock.units.v1'
           assert coverage['schema'] == 'receipt.stock.coverage.v1'
-          assert len(data['sources']) == 44
+          assert len(data['sources']) == 46
           assert data['totals']['files'] == units['counts']['units']
           assert data['unit_index']['units'] == units['counts']['units']
           assert data['unit_index']['fingerprint'] == units['fingerprint']
           assert data['coverage']['fingerprint'] == coverage['fingerprint']
           assert coverage['stock_unit_index_fingerprint'] == units['fingerprint']
-          assert data['totals']['files'] > 3162
+          assert data['totals']['files'] > 3552
           assert data['totals']['rejected'] == 0
           assert {
-              'ca-bundle', 'certificate-trust', 'charset-detection',
-              'syntax-highlighting', 'text-processing'
+              'transport', 'http-client', 'connection-pooling',
+              'dns', 'resolver', 'async-networking'
           } <= set(data['capability_tags'])
 
           joins = {
               (row['consumer_source'], row['provider_source'], row['package'])
               for row in coverage['latent_stock_joins']
           }
-          assert ('httpx-async-client', 'certifi-ca-bundle', 'certifi') in joins
-          assert ('requests-core', 'certifi-ca-bundle', 'certifi') in joins
-          assert ('requests-core', 'charset-normalizer-runtime', 'charset_normalizer') in joins
-          assert ('requests-core', 'chardet-runtime', 'chardet') in joins
-          assert ('httpx-async-client', 'pygments-highlighting', 'pygments') in joins
-          assert ('httpx2-client', 'pygments-highlighting', 'pygments') in joins
-          assert ('rich-console', 'pygments-highlighting', 'pygments') in joins
+          assert ('httpx-async-client', 'httpcore-transport', 'httpcore') in joins
+          assert ('email-validator-runtime', 'dnspython-runtime', 'dns') in joins
 
           uncovered = {row['package'] for row in coverage['uncovered_external_packages']}
-          assert 'certifi' not in uncovered
-          assert 'charset_normalizer' not in uncovered
-          assert 'chardet' not in uncovered
-          assert 'pygments' not in uncovered
-          assert coverage['totals']['latent_stock_joins'] > 108
+          assert 'httpcore' not in uncovered
+          assert 'dns' not in uncovered
+          assert coverage['totals']['latent_stock_joins'] > 116
           assert coverage['authority']['asserts_api_compatibility'] is False
           assert coverage['authority']['asserts_version_compatibility'] is False
           assert coverage['authority']['asserts_license_compatibility'] is False
@@ -88,12 +81,7 @@ jobs:
           assert click_plan['missing_local'] == []
           assert click_plan['ambiguous_local'] == []
 
-          target_providers = {
-              'certifi-ca-bundle',
-              'charset-normalizer-runtime',
-              'chardet-runtime',
-              'pygments-highlighting',
-          }
+          target_providers = {'httpcore-transport', 'dnspython-runtime'}
           target_joins = [
               row for row in coverage['latent_stock_joins']
               if row['provider_source'] in target_providers
