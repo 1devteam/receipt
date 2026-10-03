@@ -158,14 +158,16 @@ def _close_exact_from_import_modules(
 ) -> dict:
     """Refine `from package import child` against exact collected-module evidence.
 
-    If `package.child` is a collected module, add that exact child dependency. If the
-    broad parent `package` is not itself a collected module (for example a namespace
-    package without `__init__.py`), remove the broad parent so closure does not report
-    a false missing dependency. Imported symbols are never promoted to modules unless
-    their full target exactly matches a collected module.
+    If `package.child` is a collected module, add that exact child dependency. When the
+    broad parent token was provisionally classified as local or external but is not
+    itself a collected module (for example a namespace package without `__init__.py`),
+    remove it. This prevents the same proven import from remaining falsely classified
+    as both local and external. Imported symbols are never promoted to modules unless
+    their full target exactly matches collected-module evidence.
     """
     known = local_modules or set()
     local = set(dependencies.get("local") or [])
+    external = set(dependencies.get("external") or [])
     for item in topology.get("import_bindings") or []:
         if not isinstance(item, dict) or item.get("kind") != "from_import":
             continue
@@ -174,9 +176,14 @@ def _close_exact_from_import_modules(
             continue
         local.add(target)
         parent = target.rsplit(".", 1)[0] if "." in target else ""
-        if parent and parent in local and parent not in known:
+        if parent and parent not in known:
             local.discard(parent)
-    return {**dependencies, "local": sorted(local)}
+            external.discard(parent)
+    return {
+        **dependencies,
+        "local": sorted(local),
+        "external": sorted(external),
+    }
 
 
 def tops_from_rels(rels: list[str]) -> set[str]:
