@@ -31,7 +31,7 @@ jobs:
         run: |
           rm -rf /tmp/receipt-stock-bootstrap
           receipt stock bootstrap -o /tmp/receipt-stock-bootstrap
-      - name: Verify inventory, package mounts, coverage and federated discovery
+      - name: Verify inventory, mounts, dependency coverage and discovery
         run: |
           python - <<'PY'
           import json
@@ -46,19 +46,20 @@ jobs:
           assert data['schema'] == 'receipt.stock.index.v1'
           assert units['schema'] == 'receipt.stock.units.v1'
           assert coverage['schema'] == 'receipt.stock.coverage.v1'
-          assert len(data['sources']) == 12
+          assert len(data['sources']) == 15
           assert data['totals']['files'] == units['counts']['units']
           assert data['unit_index']['units'] == units['counts']['units']
           assert data['unit_index']['fingerprint'] == units['fingerprint']
           assert data['coverage']['fingerprint'] == coverage['fingerprint']
           assert coverage['stock_unit_index_fingerprint'] == units['fingerprint']
-          assert data['totals']['files'] > 2464
+          assert data['totals']['files'] > 2500
           assert data['totals']['accepted'] + data['totals']['constrained'] > 0
           assert data['totals']['rejected'] == 0
           assert data['fingerprint']
           required = {
-              'cli', 'http-client', 'network', 'data-modeling',
-              'web-api', 'web-runtime', 'asgi', 'async-networking',
+              'cli', 'http-client', 'network', 'data-modeling', 'web-api',
+              'web-runtime', 'asgi', 'async-networking', 'async-runtime',
+              'concurrency', 'transport', 'connection-pooling', 'http2',
               'database', 'orm', 'scheduling', 'observability',
               'ai-client', 'tool-interfaces'
           }
@@ -70,9 +71,10 @@ jobs:
               assert Path(source['catalog'], 'admission.v1.json').is_file()
           assert find_units(root, capabilities=['web-api'])
           assert find_units(root, capabilities=['web-runtime', 'asgi'])
+          assert find_units(root, capabilities=['transport', 'connection-pooling'])
+          assert find_units(root, capabilities=['async-runtime', 'concurrency'])
           assert find_units(root, capabilities=['database', 'orm'])
           assert find_units(root, capabilities=['ai-client', 'tool-interfaces'])
-          assert find_units(root, query='AsyncClient')
 
           joins = {
               (row['consumer_source'], row['provider_source'], row['package'])
@@ -80,10 +82,17 @@ jobs:
           }
           assert ('fastapi-web', 'pydantic-models', 'pydantic') in joins
           assert ('fastapi-web', 'starlette-web-runtime', 'starlette') in joins
+          assert ('starlette-web-runtime', 'anyio-runtime', 'anyio') in joins
           assert ('openai-sdk', 'pydantic-models', 'pydantic') in joins
+          assert ('openai-sdk', 'httpx2-client', 'httpx2') in joins
+          assert ('openai-sdk', 'anyio-runtime', 'anyio') in joins
+          assert ('httpx2-client', 'httpcore2-transport', 'httpcore2') in joins
+          assert ('httpx2-client', 'anyio-runtime', 'anyio') in joins
           uncovered = {row['package'] for row in coverage['uncovered_external_packages']}
-          assert 'httpx2' in uncovered
-          assert coverage['totals']['latent_stock_joins'] > 0
+          assert 'httpx2' not in uncovered
+          assert 'httpcore2' not in uncovered
+          assert 'anyio' not in uncovered
+          assert coverage['totals']['latent_stock_joins'] > 9
           assert coverage['authority']['asserts_api_compatibility'] is False
           assert coverage['authority']['asserts_license_compatibility'] is False
 
@@ -96,9 +105,12 @@ jobs:
           assert click_plan['missing_local'] == []
           assert click_plan['ambiguous_local'] == []
 
-          fastapi = next(unit for unit in units['units'] if unit['source_id'] == 'fastapi-web')
-          assert fastapi['rel'].startswith('fastapi/')
-          assert fastapi['source_identity']['path'].startswith('fastapi/')
+          httpx2 = next(unit for unit in units['units'] if unit['source_id'] == 'httpx2-client')
+          httpcore2 = next(unit for unit in units['units'] if unit['source_id'] == 'httpcore2-transport')
+          anyio = next(unit for unit in units['units'] if unit['source_id'] == 'anyio-runtime')
+          assert httpx2['rel'].startswith('httpx2/')
+          assert httpcore2['rel'].startswith('httpcore2/')
+          assert anyio['rel'].startswith('anyio/')
           print(json.dumps(data['totals'], indent=2))
           print(json.dumps(coverage['totals'], indent=2))
           PY
