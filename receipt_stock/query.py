@@ -14,7 +14,6 @@ class StockQueryError(ValueError):
 
 
 def _portable_identity(identity: dict[str, Any]) -> dict[str, Any]:
-    """Retain stable source identity while excluding machine-local origin data."""
     keys = ("schema", "kind", "repository", "commit", "path", "source_sha256")
     return {key: identity.get(key) for key in keys if key in identity}
 
@@ -49,10 +48,8 @@ def _effect_kinds(rec: dict[str, Any]) -> list[str]:
 
 
 def build_unit_index(stock_root: Path | str, source_rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
-    """Build a portable, cross-catalog unit index over admitted Receipt stock."""
     root = Path(stock_root).expanduser().resolve()
     units: list[dict[str, Any]] = []
-
     for source in source_rows:
         source_id = str(source.get("id") or "")
         if not source_id:
@@ -74,32 +71,21 @@ def build_unit_index(stock_root: Path | str, source_rows: Iterable[dict[str, Any
             sha = str(rec.get("source_sha256") or rec.get("sha256") or "")
             if not rel or not sha:
                 continue
-            units.append(
-                {
-                    "id": f"{source_id}:{sha}",
-                    "source_id": source_id,
-                    "repository": stock.get("repository") or source.get("repository"),
-                    "commit": stock.get("commit") or source.get("commit"),
-                    "subpath": stock.get("subpath") or source.get("subpath"),
-                    "mount": stock.get("mount") or source.get("mount"),
-                    "license": stock.get("license") or source.get("license"),
-                    "rel": rel,
-                    "original_rel": rec.get("stock_original_rel"),
-                    "source_sha256": sha,
-                    "normalized_sha256": rec.get("normalized_sha256"),
-                    "source_identity": _portable_identity(identity),
-                    "decision": admission.get("decision"),
-                    "score": admission.get("score"),
-                    "capability_tags": tags,
-                    "symbols": _symbol_names(rec),
-                    "external_dependencies": sorted(str(dep) for dep in deps.get("external") or []),
-                    "effects": _effect_kinds(rec),
-                    "has_main": bool(rec.get("has_main")),
-                    "syntax_ok": bool(rec.get("syntax_ok")),
-                    "catalog_rel": f"catalogs/{source_id}",
-                    "grants_execution_authority": False,
-                }
-            )
+            units.append({
+                "id": f"{source_id}:{sha}", "source_id": source_id,
+                "repository": stock.get("repository") or source.get("repository"),
+                "commit": stock.get("commit") or source.get("commit"),
+                "subpath": stock.get("subpath") or source.get("subpath"),
+                "mount": stock.get("mount") or source.get("mount"),
+                "mount_kind": stock.get("mount_kind") or source.get("mount_kind") or "package",
+                "license": stock.get("license") or source.get("license"), "rel": rel,
+                "original_rel": rec.get("stock_original_rel"), "source_sha256": sha,
+                "normalized_sha256": rec.get("normalized_sha256"), "source_identity": _portable_identity(identity),
+                "decision": admission.get("decision"), "score": admission.get("score"), "capability_tags": tags,
+                "symbols": _symbol_names(rec), "external_dependencies": sorted(str(dep) for dep in deps.get("external") or []),
+                "effects": _effect_kinds(rec), "has_main": bool(rec.get("has_main")), "syntax_ok": bool(rec.get("syntax_ok")),
+                "catalog_rel": f"catalogs/{source_id}", "grants_execution_authority": False,
+            })
 
     units.sort(key=lambda row: (str(row.get("source_id") or ""), str(row.get("rel") or "")))
     tag_counts: dict[str, int] = {}
@@ -112,21 +98,10 @@ def build_unit_index(stock_root: Path | str, source_rows: Iterable[dict[str, Any
 
     index: dict[str, Any] = {
         "schema": STOCK_UNITS_SCHEMA,
-        "purpose": (
-            "Portable cross-catalog index for discovering Receipt stock units by proven "
-            "capability, contract symbol, dependency and source identity."
-        ),
+        "purpose": "Portable cross-catalog index for discovering Receipt stock units by proven capability, contract symbol, dependency and source identity.",
         "units": units,
-        "counts": {
-            "units": len(units),
-            "decisions": dict(sorted(decision_counts.items())),
-            "capability_tags": dict(sorted(tag_counts.items())),
-        },
-        "security": {
-            "contains_machine_local_origin": False,
-            "contains_raw_source": False,
-            "contains_normalized_source": False,
-        },
+        "counts": {"units": len(units), "decisions": dict(sorted(decision_counts.items())), "capability_tags": dict(sorted(tag_counts.items()))},
+        "security": {"contains_machine_local_origin": False, "contains_raw_source": False, "contains_normalized_source": False},
         "grants_execution_authority": False,
     }
     index["fingerprint"] = canonical_fingerprint(index)
@@ -151,18 +126,7 @@ def load_unit_index(stock_root: Path | str) -> dict[str, Any]:
     return data
 
 
-def find_units(
-    stock_root: Path | str,
-    *,
-    query: str | None = None,
-    capabilities: Iterable[str] | None = None,
-    require_all_capabilities: bool = True,
-    source_id: str | None = None,
-    decision: str | None = None,
-    external: str | None = None,
-    limit: int | None = 50,
-) -> list[dict[str, Any]]:
-    """Search all materialized stock catalogs without flattening provenance."""
+def find_units(stock_root: Path | str, *, query: str | None = None, capabilities: Iterable[str] | None = None, require_all_capabilities: bool = True, source_id: str | None = None, decision: str | None = None, external: str | None = None, limit: int | None = 50) -> list[dict[str, Any]]:
     data = load_unit_index(stock_root)
     wanted_tags = {str(tag).strip().lower() for tag in (capabilities or []) if str(tag).strip()}
     q = (query or "").strip().lower()
@@ -170,7 +134,6 @@ def find_units(
     decision_filter = (decision or "").strip().lower()
     external_filter = (external or "").strip().lower()
     hits: list[dict[str, Any]] = []
-
     for unit in data.get("units") or []:
         if not isinstance(unit, dict):
             continue
@@ -189,18 +152,14 @@ def find_units(
             if not any(external_filter == dep or external_filter in dep for dep in externals):
                 continue
         if q:
-            searchable = " ".join(
-                [
-                    str(unit.get("source_id") or ""),
-                    str(unit.get("repository") or ""),
-                    str(unit.get("rel") or ""),
-                    str(unit.get("mount") or ""),
-                    " ".join(str(name) for name in unit.get("symbols") or []),
-                    " ".join(str(tag) for tag in unit.get("capability_tags") or []),
-                    " ".join(str(dep) for dep in unit.get("external_dependencies") or []),
-                    " ".join(str(effect) for effect in unit.get("effects") or []),
-                ]
-            ).lower()
+            searchable = " ".join([
+                str(unit.get("source_id") or ""), str(unit.get("repository") or ""), str(unit.get("rel") or ""),
+                str(unit.get("mount") or ""), str(unit.get("mount_kind") or ""),
+                " ".join(str(name) for name in unit.get("symbols") or []),
+                " ".join(str(tag) for tag in unit.get("capability_tags") or []),
+                " ".join(str(dep) for dep in unit.get("external_dependencies") or []),
+                " ".join(str(effect) for effect in unit.get("effects") or []),
+            ]).lower()
             if q not in searchable:
                 continue
         hits.append(unit)
