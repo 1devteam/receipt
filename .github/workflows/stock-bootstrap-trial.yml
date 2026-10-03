@@ -48,13 +48,13 @@ jobs:
           assert data['schema'] == 'receipt.stock.index.v1'
           assert units['schema'] == 'receipt.stock.units.v1'
           assert coverage['schema'] == 'receipt.stock.coverage.v1'
-          assert len(data['sources']) == 18
+          assert len(data['sources']) == 24
           assert data['totals']['files'] == units['counts']['units']
           assert data['unit_index']['units'] == units['counts']['units']
           assert data['unit_index']['fingerprint'] == units['fingerprint']
           assert data['coverage']['fingerprint'] == coverage['fingerprint']
           assert coverage['stock_unit_index_fingerprint'] == units['fingerprint']
-          assert data['totals']['files'] > 2607
+          assert data['totals']['files'] > 2613
           assert data['totals']['accepted'] + data['totals']['constrained'] > 0
           assert data['totals']['rejected'] == 0
           assert data['fingerprint']
@@ -64,7 +64,8 @@ jobs:
               'concurrency', 'transport', 'connection-pooling', 'http2',
               'database', 'orm', 'scheduling', 'observability',
               'ai-client', 'tool-interfaces', 'typing', 'type-hints',
-              'runtime-introspection', 'constraints'
+              'runtime-introspection', 'constraints', 'validation-core',
+              'documentation-metadata', 'websocket', 'idna', 'tls'
           }
           assert required <= set(data['capability_tags'])
           for source in data['sources']:
@@ -85,11 +86,22 @@ jobs:
           assert ('pydantic-models', 'typing-extensions', 'typing_extensions') in joins
           assert ('pydantic-models', 'typing-inspection', 'typing_inspection') in joins
           assert ('pydantic-models', 'annotated-types', 'annotated_types') in joins
+          assert ('pydantic-models', 'pydantic-core-runtime', 'pydantic_core') in joins
+          assert ('fastapi-web', 'annotated-doc', 'annotated_doc') in joins
+          assert ('openai-sdk', 'websockets-runtime', 'websockets') in joins
+          assert ('openai-sdk', 'sniffio-runtime', 'sniffio') in joins
+          assert ('requests-core', 'idna-runtime', 'idna') in joins
+          assert ('requests-core', 'urllib3-runtime', 'urllib3') in joins
+
           uncovered = {row['package'] for row in coverage['uncovered_external_packages']}
-          assert 'typing_extensions' not in uncovered
-          assert 'typing_inspection' not in uncovered
-          assert 'annotated_types' not in uncovered
-          assert coverage['totals']['latent_stock_joins'] > 20
+          for package in {
+              'typing_extensions', 'typing_inspection', 'annotated_types',
+              'pydantic_core', 'annotated_doc', 'websockets', 'sniffio',
+              'idna', 'urllib3'
+          }:
+              assert package not in uncovered
+          assert coverage['totals']['latent_stock_joins'] > 35
+          assert coverage['totals']['uncovered_external_references'] < 229
           assert coverage['authority']['asserts_api_compatibility'] is False
           assert coverage['authority']['asserts_license_compatibility'] is False
 
