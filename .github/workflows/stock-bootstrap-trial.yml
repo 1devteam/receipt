@@ -47,32 +47,32 @@ jobs:
           assert data['schema'] == 'receipt.stock.index.v1'
           assert units['schema'] == 'receipt.stock.units.v1'
           assert coverage['schema'] == 'receipt.stock.coverage.v1'
-          assert len(data['sources']) == 33
+          assert len(data['sources']) == 36
           assert data['totals']['files'] == units['counts']['units']
           assert data['unit_index']['units'] == units['counts']['units']
           assert data['unit_index']['fingerprint'] == units['fingerprint']
           assert data['coverage']['fingerprint'] == coverage['fingerprint']
           assert coverage['stock_unit_index_fingerprint'] == units['fingerprint']
-          assert data['totals']['files'] > 2921
+          assert data['totals']['files'] > 2938
           assert data['totals']['rejected'] == 0
-          assert {'multipart', 'form-data', 'file-upload', 'email-validation', 'normalization'} <= set(data['capability_tags'])
+          assert {'retry', 'resilience', 'terminal-ui', 'diagnostics', 'yaml', 'safe-loading'} <= set(data['capability_tags'])
 
           joins = {
               (row['consumer_source'], row['provider_source'], row['package'])
               for row in coverage['latent_stock_joins']
           }
-          assert ('fastapi-web', 'python-multipart-runtime', 'python_multipart') in joins
-          assert ('starlette-web-runtime', 'python-multipart-runtime', 'python_multipart') in joins
-          assert ('fastapi-web', 'multipart-compat', 'multipart') in joins
-          assert ('starlette-web-runtime', 'multipart-compat', 'multipart') in joins
-          assert ('fastapi-web', 'email-validator-runtime', 'email_validator') in joins
-          assert ('pydantic-models', 'email-validator-runtime', 'email_validator') in joins
+          assert ('apscheduler-runtime', 'tenacity-resilience', 'tenacity') in joins
+          assert ('httpx-async-client', 'rich-console', 'rich') in joins
+          assert ('pydantic-models', 'rich-console', 'rich') in joins
+          assert ('structlog-observability', 'rich-console', 'rich') in joins
+          assert ('starlette-web-runtime', 'pyyaml-config', 'yaml') in joins
+          assert ('trio-runtime', 'pyyaml-config', 'yaml') in joins
 
           uncovered = {row['package'] for row in coverage['uncovered_external_packages']}
-          assert 'python_multipart' not in uncovered
-          assert 'multipart' not in uncovered
-          assert 'email_validator' not in uncovered
-          assert coverage['totals']['latent_stock_joins'] > 78
+          assert 'tenacity' not in uncovered
+          assert 'rich' not in uncovered
+          assert 'yaml' not in uncovered
+          assert coverage['totals']['latent_stock_joins'] > 86
           assert coverage['authority']['asserts_api_compatibility'] is False
           assert coverage['authority']['asserts_version_compatibility'] is False
           assert coverage['authority']['asserts_license_compatibility'] is False
@@ -83,7 +83,7 @@ jobs:
           assert click_plan['missing_local'] == []
           assert click_plan['ambiguous_local'] == []
 
-          target_providers = {'python-multipart-runtime', 'multipart-compat', 'email-validator-runtime'}
+          target_providers = {'tenacity-resilience', 'rich-console', 'pyyaml-config'}
           target_joins = [
               row for row in coverage['latent_stock_joins']
               if row['provider_source'] in target_providers
