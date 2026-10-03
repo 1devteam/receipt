@@ -47,33 +47,37 @@ jobs:
           assert data['schema'] == 'receipt.stock.index.v1'
           assert units['schema'] == 'receipt.stock.units.v1'
           assert coverage['schema'] == 'receipt.stock.coverage.v1'
-          assert len(data['sources']) == 40
+          assert len(data['sources']) == 44
           assert data['totals']['files'] == units['counts']['units']
           assert data['unit_index']['units'] == units['counts']['units']
           assert data['unit_index']['fingerprint'] == units['fingerprint']
           assert data['coverage']['fingerprint'] == coverage['fingerprint']
           assert coverage['stock_unit_index_fingerprint'] == units['fingerprint']
-          assert data['totals']['files'] > 3067
+          assert data['totals']['files'] > 3162
           assert data['totals']['rejected'] == 0
-          assert {'proxy', 'socks4', 'socks5', 'http-connect', 'handshake'} <= set(data['capability_tags'])
+          assert {
+              'ca-bundle', 'certificate-trust', 'charset-detection',
+              'syntax-highlighting', 'text-processing'
+          } <= set(data['capability_tags'])
 
           joins = {
               (row['consumer_source'], row['provider_source'], row['package'])
               for row in coverage['latent_stock_joins']
           }
-          assert ('httpcore2-transport', 'socksio-proxy', 'socksio') in joins
-          assert ('httpx-async-client', 'socksio-proxy', 'socksio') in joins
-          assert ('httpx2-client', 'socksio-proxy', 'socksio') in joins
-          assert ('websockets-runtime', 'python-socks-proxy', 'python_socks') in joins
-          assert ('httpx2-client', 'wsproto-protocol', 'wsproto') in joins
-          assert ('wsproto-protocol', 'h11-protocol', 'h11') in joins
+          assert ('httpx-async-client', 'certifi-ca-bundle', 'certifi') in joins
+          assert ('requests-core', 'certifi-ca-bundle', 'certifi') in joins
+          assert ('requests-core', 'charset-normalizer-runtime', 'charset_normalizer') in joins
+          assert ('requests-core', 'chardet-runtime', 'chardet') in joins
+          assert ('httpx-async-client', 'pygments-highlighting', 'pygments') in joins
+          assert ('httpx2-client', 'pygments-highlighting', 'pygments') in joins
+          assert ('rich-console', 'pygments-highlighting', 'pygments') in joins
 
           uncovered = {row['package'] for row in coverage['uncovered_external_packages']}
-          assert 'socksio' not in uncovered
-          assert 'python_socks' not in uncovered
-          assert 'wsproto' not in uncovered
-          assert 'h11' not in uncovered
-          assert coverage['totals']['latent_stock_joins'] > 98
+          assert 'certifi' not in uncovered
+          assert 'charset_normalizer' not in uncovered
+          assert 'chardet' not in uncovered
+          assert 'pygments' not in uncovered
+          assert coverage['totals']['latent_stock_joins'] > 108
           assert coverage['authority']['asserts_api_compatibility'] is False
           assert coverage['authority']['asserts_version_compatibility'] is False
           assert coverage['authority']['asserts_license_compatibility'] is False
@@ -84,7 +88,12 @@ jobs:
           assert click_plan['missing_local'] == []
           assert click_plan['ambiguous_local'] == []
 
-          target_providers = {'socksio-proxy', 'python-socks-proxy', 'wsproto-protocol', 'h11-protocol'}
+          target_providers = {
+              'certifi-ca-bundle',
+              'charset-normalizer-runtime',
+              'chardet-runtime',
+              'pygments-highlighting',
+          }
           target_joins = [
               row for row in coverage['latent_stock_joins']
               if row['provider_source'] in target_providers
