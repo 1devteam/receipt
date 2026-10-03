@@ -7,6 +7,7 @@ from pathlib import Path
 
 from common.io import read_json
 from receipt_stock.bootstrap import bootstrap_stock
+from receipt_stock.build import StockBuildError, plan_stock, stack_stock
 from receipt_stock.manifest import StockManifestError, load_bootstrap_manifest
 from receipt_stock.query import StockQueryError, find_units, load_unit_index
 
@@ -18,7 +19,7 @@ def _print(data) -> None:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="receipt-stock",
-        description="Receipt curated stock bootstrap, inventory and cross-catalog discovery",
+        description="Receipt curated stock bootstrap, inventory, discovery and source-safe stacking",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -54,6 +55,25 @@ def main(argv: list[str] | None = None) -> int:
 
     p_units = sub.add_parser("units", help="show the federated stock-unit index summary")
     p_units.add_argument("root", help="materialized stock root")
+
+    p_plan = sub.add_parser(
+        "plan",
+        help="map explicit federated stock unit ids into the existing source-local Receipt stack plan",
+    )
+    p_plan.add_argument("root", help="materialized stock root")
+    p_plan.add_argument("unit_ids", nargs="+", help="exact stock unit id or unique id prefix")
+
+    p_stack = sub.add_parser(
+        "stack",
+        help="compile explicit stock unit ids through the existing Receipt stack/compiler path",
+    )
+    p_stack.add_argument("root", help="materialized stock root")
+    p_stack.add_argument("unit_ids", nargs="+", help="exact stock unit id or unique id prefix")
+    p_stack.add_argument("--name", required=True, help="batch/package name")
+    p_stack.add_argument("-o", "--out", required=True, help="output project directory")
+    p_stack.add_argument("--work", default=None, help="keep staging directory")
+    p_stack.add_argument("--check", action="store_true", help="explicitly run Director import checks after build")
+    p_stack.add_argument("--force", action="store_true", help="allow existing stack force boundary")
 
     args = p.parse_args(sys.argv[1:] if argv is None else argv)
     try:
@@ -106,7 +126,29 @@ def main(argv: list[str] | None = None) -> int:
                 }
             )
             return 0 if hits else 1
-    except (StockManifestError, StockQueryError, ValueError, OSError) as exc:
+        if args.cmd == "plan":
+            result = plan_stock(args.root, args.unit_ids)
+            _print(result)
+            plan = result.get("plan") or {}
+            return 2 if plan.get("missing_local") or plan.get("ambiguous_local") else 0
+        if args.cmd == "stack":
+            result = stack_stock(
+                args.root,
+                args.unit_ids,
+                name=args.name,
+                out=args.out,
+                work=args.work,
+                check=args.check,
+                force=args.force,
+            )
+            _print(result)
+            if result.get("compile_errors") or result.get("compiler_contract_violations"):
+                return 2
+            roster = result.get("roster") or {}
+            if roster and (not roster.get("local_graph_ok") or not roster.get("ready")):
+                return 3
+            return 0
+    except (StockManifestError, StockQueryError, StockBuildError, ValueError, OSError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     return 1
