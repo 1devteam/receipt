@@ -11,7 +11,9 @@ Receipt stock bootstrap turns a reviewed manifest of pinned Python source trees 
 - hard evidence failures are rejected rather than silently admitted;
 - dynamic imports, external requirements, and effect-bearing code are surfaced as constraints rather than erased;
 - each source remains an independent catalog with its original provenance;
-- an aggregate `receipt.stock.index.v1` joins the source catalogs without flattening their identities;
+- `receipt.stock.index.v1` summarizes the source catalogs without flattening their identities;
+- `receipt.stock.units.v1` provides a portable cross-catalog discovery index while preserving source id, repository, commit, relative path, content identity, admission evidence and capability facts;
+- the portable unit index excludes raw/normalized source and machine-local origins;
 - bootstrapping does not import or execute collected third-party application code;
 - no stock artifact grants execution authority.
 
@@ -29,9 +31,29 @@ The bootstrap manifest provides broad source capabilities such as `cli`, `web-ap
 
 Tags describe available capability evidence. They do not decide what the user should build.
 
+## Federated stock discovery
+
+A materialized bootstrap writes `stock-units.v1.json`. This is the searchable inventory over all source catalogs. It does not copy source bodies and it does not remove provenance boundaries. Each unit retains enough stable evidence to return to its original catalog and exact source identity.
+
+Examples:
+
+```text
+receipt stock units ~/receipt-stock
+receipt stock find ~/receipt-stock AsyncClient
+receipt stock find ~/receipt-stock --capability web-api
+receipt stock find ~/receipt-stock --capability database --capability orm
+receipt stock find ~/receipt-stock --capability ai-client --capability tool-interfaces
+receipt stock find ~/receipt-stock --source fastapi-web --decision accepted
+receipt stock find ~/receipt-stock --external pydantic
+```
+
+Repeated `--capability` filters require all supplied capabilities by default. `--any-capability` switches that to any-match behavior.
+
+The discovery layer is deliberately not a planner. It answers what is actually in stock and exposes source-backed selection facts; the existing stack/compiler path remains responsible for assembly.
+
 ## Bundled bootstrap
 
-The bundled bootstrap now covers the major reusable capability lanes Receipt needs for practical program assembly while keeping every lane pinned and provenance-preserving:
+The bundled bootstrap covers the major reusable capability lanes Receipt needs for practical program assembly while keeping every lane pinned and provenance-preserving:
 
 - `pallets/click` — CLI, command dispatch, configuration, terminal I/O;
 - `psf/requests` — synchronous HTTP/network client infrastructure;
@@ -58,6 +80,7 @@ Materialized layout:
 receipt-stock/
 ├── bootstrap-manifest.v1.json
 ├── stock-index.v1.json
+├── stock-units.v1.json
 └── catalogs/
     ├── click-core/
     ├── requests-core/
