@@ -47,29 +47,30 @@ jobs:
           assert data['schema'] == 'receipt.stock.index.v1'
           assert units['schema'] == 'receipt.stock.units.v1'
           assert coverage['schema'] == 'receipt.stock.coverage.v1'
-          assert len(data['sources']) == 26
+          assert len(data['sources']) == 29
           assert data['totals']['files'] == units['counts']['units']
           assert data['unit_index']['units'] == units['counts']['units']
           assert data['unit_index']['fingerprint'] == units['fingerprint']
           assert data['coverage']['fingerprint'] == coverage['fingerprint']
           assert coverage['stock_unit_index_fingerprint'] == units['fingerprint']
-          assert data['totals']['files'] > 2719
+          assert data['totals']['files'] > 2875
           assert data['totals']['rejected'] == 0
-          assert {'protocol', 'flow-control', 'task-groups', 'cancellation'} <= set(data['capability_tags'])
+          assert {'result-container', 'header-compression', 'framing'} <= set(data['capability_tags'])
 
           joins = {
               (row['consumer_source'], row['provider_source'], row['package'])
               for row in coverage['latent_stock_joins']
           }
-          assert ('anyio-runtime', 'trio-runtime', 'trio') in joins
-          assert ('websockets-runtime', 'trio-runtime', 'trio') in joins
-          assert ('httpcore2-transport', 'h2-protocol', 'h2') in joins
-          assert ('httpx2-client', 'h2-protocol', 'h2') in joins
+          assert ('trio-runtime', 'outcome-runtime', 'outcome') in joins
+          assert ('anyio-runtime', 'outcome-runtime', 'outcome') in joins
+          assert ('h2-protocol', 'hpack-protocol', 'hpack') in joins
+          assert ('h2-protocol', 'hyperframe-protocol', 'hyperframe') in joins
 
           uncovered = {row['package'] for row in coverage['uncovered_external_packages']}
-          assert 'trio' not in uncovered
-          assert 'h2' not in uncovered
-          assert coverage['totals']['latent_stock_joins'] > 54
+          assert 'outcome' not in uncovered
+          assert 'hpack' not in uncovered
+          assert 'hyperframe' not in uncovered
+          assert coverage['totals']['latent_stock_joins'] > 68
           assert coverage['authority']['asserts_api_compatibility'] is False
           assert coverage['authority']['asserts_license_compatibility'] is False
 
@@ -78,9 +79,10 @@ jobs:
           assert click_plan['missing_local'] == []
           assert click_plan['ambiguous_local'] == []
 
+          target_providers = {'outcome-runtime', 'hpack-protocol', 'hyperframe-protocol'}
           target_joins = [
               row for row in coverage['latent_stock_joins']
-              if row['provider_source'] in {'trio-runtime', 'h2-protocol'}
+              if row['provider_source'] in target_providers
           ]
           target_joins.sort(key=lambda row: (row['provider_source'], row['consumer_source'], row['package']))
           print(json.dumps(data['totals'], indent=2))
