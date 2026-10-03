@@ -15,12 +15,7 @@
       "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
       "subpath": "src/click",
       "license": "BSD-3-Clause",
-      "capabilities": [
-        "cli",
-        "configuration",
-        "terminal-io",
-        "command-dispatch"
-      ]
+      "capabilities": ["cli", "configuration", "terminal-io", "command-dispatch"]
     },
     {
       "id": "requests-core",
@@ -28,12 +23,7 @@
       "commit": "611c6162cbc4ac2020a2f91c7cfa4f3abf9bbb60",
       "subpath": "src/requests",
       "license": "Apache-2.0",
-      "capabilities": [
-        "http-client",
-        "network",
-        "authentication",
-        "serialization"
-      ]
+      "capabilities": ["http-client", "network", "authentication", "serialization"]
     },
     {
       "id": "attrs-modern",
@@ -41,12 +31,7 @@
       "commit": "a602f78ff670f22be90fb8aea501a6cc30e10fdd",
       "subpath": "src/attrs",
       "license": "MIT",
-      "capabilities": [
-        "data-modeling",
-        "validation",
-        "typing",
-        "serialization-support"
-      ]
+      "capabilities": ["data-modeling", "validation", "typing", "serialization-support"]
     },
     {
       "id": "attrs-compat",
@@ -54,12 +39,7 @@
       "commit": "a602f78ff670f22be90fb8aea501a6cc30e10fdd",
       "subpath": "src/attr",
       "license": "MIT",
-      "capabilities": [
-        "data-modeling",
-        "validation",
-        "compatibility",
-        "typing"
-      ]
+      "capabilities": ["data-modeling", "validation", "compatibility", "typing"]
     },
     {
       "id": "fastapi-web",
@@ -67,13 +47,15 @@
       "commit": "5f9fc5c59a9bb54608aa35376715f3ba9708188e",
       "subpath": "fastapi",
       "license": "MIT",
-      "capabilities": [
-        "web-api",
-        "routing",
-        "dependency-injection",
-        "request-validation",
-        "openapi"
-      ]
+      "capabilities": ["web-api", "routing", "dependency-injection", "request-validation", "openapi"]
+    },
+    {
+      "id": "starlette-web-runtime",
+      "repository": "Kludex/starlette",
+      "commit": "4e7fc04e5f2c69f60e418ff2107d0f6d9a0fe423",
+      "subpath": "starlette",
+      "license": "BSD-3-Clause",
+      "capabilities": ["asgi", "web-runtime", "routing", "middleware", "websocket", "streaming"]
     },
     {
       "id": "httpx-async-client",
@@ -81,13 +63,7 @@
       "commit": "b5addb64f0161ff6bfe94c124ef76f6a1fba5254",
       "subpath": "httpx",
       "license": "BSD-3-Clause",
-      "capabilities": [
-        "http-client",
-        "async-networking",
-        "network",
-        "streaming",
-        "authentication"
-      ]
+      "capabilities": ["http-client", "async-networking", "network", "streaming", "authentication"]
     },
     {
       "id": "sqlalchemy-core",
@@ -95,13 +71,7 @@
       "commit": "3e4da2348053a45e5459e2660c493b22a4965e78",
       "subpath": "lib/sqlalchemy",
       "license": "MIT",
-      "capabilities": [
-        "database",
-        "sql",
-        "orm",
-        "persistence",
-        "transactions"
-      ]
+      "capabilities": ["database", "sql", "orm", "persistence", "transactions"]
     },
     {
       "id": "pydantic-models",
@@ -109,13 +79,7 @@
       "commit": "e87e11b7a74068c2d8107e48ffed6102744abef8",
       "subpath": "pydantic",
       "license": "MIT",
-      "capabilities": [
-        "data-modeling",
-        "validation",
-        "typing",
-        "serialization",
-        "schema"
-      ]
+      "capabilities": ["data-modeling", "validation", "typing", "serialization", "schema"]
     },
     {
       "id": "apscheduler-runtime",
@@ -123,13 +87,7 @@
       "commit": "b227d21fce2c8cca56dc421cbc07fa6eca7db541",
       "subpath": "src/apscheduler",
       "license": "MIT",
-      "capabilities": [
-        "scheduling",
-        "jobs",
-        "async-runtime",
-        "persistence",
-        "coordination"
-      ]
+      "capabilities": ["scheduling", "jobs", "async-runtime", "persistence", "coordination"]
     },
     {
       "id": "structlog-observability",
@@ -137,13 +95,7 @@
       "commit": "91f44ae9031c80ad9c6045172f182803543ba6ba",
       "subpath": "src/structlog",
       "license": "MIT",
-      "capabilities": [
-        "logging",
-        "observability",
-        "structured-events",
-        "context",
-        "instrumentation"
-      ]
+      "capabilities": ["logging", "observability", "structured-events", "context", "instrumentation"]
     },
     {
       "id": "openai-sdk",
@@ -151,13 +103,7 @@
       "commit": "becc1d20eed83c1b8d85e15dc131a372d9dc7813",
       "subpath": "src/openai",
       "license": "Apache-2.0",
-      "capabilities": [
-        "ai-client",
-        "tool-interfaces",
-        "structured-output",
-        "streaming",
-        "async-networking"
-      ]
+      "capabilities": ["ai-client", "tool-interfaces", "structured-output", "streaming", "async-networking"]
     }
   ],
   "grants_execution_authority": false
