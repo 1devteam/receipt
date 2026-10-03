@@ -113,4 +113,6 @@ jobs:
           assert anyio['rel'].startswith('anyio/')
           print(json.dumps(data['totals'], indent=2))
           print(json.dumps(coverage['totals'], indent=2))
+          print('TOP_UNCOVERED_STOCK_GAPS')
+          print(json.dumps(coverage['uncovered_external_packages'][:25], indent=2))
           PY
