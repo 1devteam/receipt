@@ -41,6 +41,7 @@ def main(argv: list[str] | None = None) -> int:
         epilog=(
             "Shelf commands are first-class. Local UI: receipt dashboard. "
             "Build steps via collect/compile/produce/direct or receipt stack. "
+            "Curated inventory via receipt stock bootstrap. "
             "collect TREE may be a local path or a GitHub spec. "
             "receipt sync refreshes a GitHub-backed catalog."
         ),
@@ -139,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
         help="allow origin switch (not required for same-repo ref updates)",
     )
 
-    # Thin delegates so one binary covers the pipeline too.
+    # Thin delegates so one binary covers the pipeline and stock surfaces too.
     p_collect = sub.add_parser("collect", help="delegate to collect")
     p_collect.add_argument("args", nargs=argparse.REMAINDER)
 
@@ -154,6 +155,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p_pipe = sub.add_parser("pipeline", help="delegate to pipeline")
     p_pipe.add_argument("args", nargs=argparse.REMAINDER)
+
+    p_stock = sub.add_parser("stock", help="curated stock manifest / bootstrap / status")
+    p_stock.add_argument("args", nargs=argparse.REMAINDER)
 
     args = p.parse_args(argv)
 
@@ -266,6 +270,11 @@ def main(argv: list[str] | None = None) -> int:
             from pipeline.cli import main as pipeline_main
 
             return pipeline_main(_remainder(args.args))
+
+        if args.cmd == "stock":
+            from receipt_stock.cli import main as stock_main
+
+            return stock_main(_remainder(args.args))
 
     except (ShelfError, StackError, CollectError) as exc:
         print(str(exc), file=sys.stderr)

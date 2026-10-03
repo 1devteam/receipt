@@ -1,0 +1,54 @@
+name: stock-bootstrap-trial
+
+on:
+  pull_request:
+    paths:
+      - 'receipt_stock/**'
+      - 'collector/**'
+      - 'common/**'
+      - 'receipt_graft/**'
+      - 'receipt_cli/**'
+      - 'pyproject.toml'
+      - 'tests/test_stock_bootstrap.py'
+      - '.github/workflows/stock-bootstrap-trial.yml'
+  workflow_dispatch:
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Receipt
+        run: python -m pip install -e '.[dev]'
+      - name: Bootstrap pinned curated stock
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf /tmp/receipt-stock-bootstrap
+          receipt stock bootstrap -o /tmp/receipt-stock-bootstrap
+      - name: Verify inventory
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('/tmp/receipt-stock-bootstrap')
+          data = json.loads((root / 'stock-index.v1.json').read_text())
+          assert data['schema'] == 'receipt.stock.index.v1'
+          assert len(data['sources']) == 4
+          # The bootstrap intentionally ingests focused library source trees, not tests/docs/vendor noise.
+          assert data['totals']['files'] >= 50
+          assert data['totals']['accepted'] + data['totals']['constrained'] > 0
+          assert data['totals']['rejected'] == 0
+          assert data['fingerprint']
+          assert {'cli', 'http-client', 'network', 'data-modeling'} <= set(data['capability_tags'])
+          for source in data['sources']:
+              assert source['stock_graph_fingerprint']
+              assert Path(source['catalog'], 'receipts.json').is_file()
+              assert Path(source['catalog'], 'admission.v1.json').is_file()
+          print(json.dumps(data['totals'], indent=2))
+          print(json.dumps(data['capability_tags'], indent=2))
+          PY

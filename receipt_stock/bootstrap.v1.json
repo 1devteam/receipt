@@ -1,0 +1,66 @@
+{
+  "schema": "receipt.stock.bootstrap.v1",
+  "name": "receipt-core-stock-bootstrap",
+  "policy": {
+    "provenance_required": true,
+    "pinned_commits_required": true,
+    "license_metadata_required": true,
+    "runtime_execution": false,
+    "admission": "deterministic-source-evidence"
+  },
+  "sources": [
+    {
+      "id": "click-core",
+      "repository": "pallets/click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "subpath": "src/click",
+      "license": "BSD-3-Clause",
+      "capabilities": [
+        "cli",
+        "configuration",
+        "terminal-io",
+        "command-dispatch"
+      ]
+    },
+    {
+      "id": "requests-core",
+      "repository": "psf/requests",
+      "commit": "611c6162cbc4ac2020a2f91c7cfa4f3abf9bbb60",
+      "subpath": "src/requests",
+      "license": "Apache-2.0",
+      "capabilities": [
+        "http-client",
+        "network",
+        "authentication",
+        "serialization"
+      ]
+    },
+    {
+      "id": "attrs-modern",
+      "repository": "python-attrs/attrs",
+      "commit": "a602f78ff670f22be90fb8aea501a6cc30e10fdd",
+      "subpath": "src/attrs",
+      "license": "MIT",
+      "capabilities": [
+        "data-modeling",
+        "validation",
+        "typing",
+        "serialization-support"
+      ]
+    },
+    {
+      "id": "attrs-compat",
+      "repository": "python-attrs/attrs",
+      "commit": "a602f78ff670f22be90fb8aea501a6cc30e10fdd",
+      "subpath": "src/attr",
+      "license": "MIT",
+      "capabilities": [
+        "data-modeling",
+        "validation",
+        "compatibility",
+        "typing"
+      ]
+    }
+  ],
+  "grants_execution_authority": false
+}
