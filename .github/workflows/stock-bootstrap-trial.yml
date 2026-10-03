@@ -10,6 +10,7 @@ on:
       - 'receipt_cli/**'
       - 'pyproject.toml'
       - 'tests/test_stock_bootstrap.py'
+      - 'tests/test_stock_build.py'
       - '.github/workflows/stock-bootstrap-trial.yml'
   workflow_dispatch:
 
@@ -29,11 +30,12 @@ jobs:
         run: |
           rm -rf /tmp/receipt-stock-bootstrap
           receipt stock bootstrap -o /tmp/receipt-stock-bootstrap
-      - name: Verify inventory and federated discovery
+      - name: Verify inventory, package mounts and federated discovery
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
+          from receipt_stock.build import plan_stock
           from receipt_stock.query import find_units
 
           root = Path('/tmp/receipt-stock-bootstrap')
@@ -57,12 +59,28 @@ jobs:
           assert required <= set(data['capability_tags'])
           for source in data['sources']:
               assert source['stock_graph_fingerprint']
+              assert source['mount']
               assert Path(source['catalog'], 'receipts.json').is_file()
               assert Path(source['catalog'], 'admission.v1.json').is_file()
           assert find_units(root, capabilities=['web-api'])
           assert find_units(root, capabilities=['database', 'orm'])
           assert find_units(root, capabilities=['ai-client', 'tool-interfaces'])
           assert find_units(root, query='AsyncClient')
+
+          click = next(
+              unit for unit in units['units']
+              if unit['source_id'] == 'click-core' and unit['rel'] == 'click/core.py'
+          )
+          assert click['mount'] == 'click'
+          click_plan = plan_stock(root, [click['id']])['plan']
+          assert click_plan['count'] > 1
+          assert click_plan['missing_local'] == []
+          assert click_plan['ambiguous_local'] == []
+
+          fastapi = next(unit for unit in units['units'] if unit['source_id'] == 'fastapi-web')
+          assert fastapi['rel'].startswith('fastapi/')
+          assert fastapi['source_identity']['path'].startswith('fastapi/')
           print(json.dumps(data['totals'], indent=2))
           print(json.dumps(units['counts'], indent=2))
+          print(json.dumps({'click_plan_units': click_plan['count']}, indent=2))
           PY

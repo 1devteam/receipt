@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable
 
-from common.io import read_json, write_json
+from common.io import write_json
 from receipt_cli.stack import plan as stack_plan
 from receipt_cli.stack import stack as stack_build
 from receipt_graft.evidence import canonical_fingerprint
@@ -61,8 +61,10 @@ def _selection(index: dict[str, Any], selected: list[dict[str, Any]], plan_data:
             "repository": unit.get("repository"),
             "commit": unit.get("commit"),
             "subpath": unit.get("subpath"),
+            "mount": unit.get("mount"),
             "license": unit.get("license"),
             "rel": unit.get("rel"),
+            "original_rel": unit.get("original_rel"),
             "source_sha256": unit.get("source_sha256"),
             "normalized_sha256": unit.get("normalized_sha256"),
             "source_identity": unit.get("source_identity"),
@@ -83,6 +85,7 @@ def _selection(index: dict[str, Any], selected: list[dict[str, Any]], plan_data:
         "source_id": source_id,
         "repository": selected[0].get("repository"),
         "commit": selected[0].get("commit"),
+        "mount": selected[0].get("mount"),
         "selected_units": units,
         "requested_rels": sorted(str(unit.get("rel") or "") for unit in selected),
         "resolved_plan": {
@@ -158,6 +161,7 @@ def stack_stock(
             "artifact": str(artifact),
             "fingerprint": selection.get("fingerprint"),
             "source_id": selection.get("source_id"),
+            "mount": selection.get("mount"),
             "selected_units": len(selection.get("selected_units") or []),
             "grants_execution_authority": False,
         },
