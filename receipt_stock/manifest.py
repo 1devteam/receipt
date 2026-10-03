@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from importlib.resources import files
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 BOOTSTRAP_SCHEMA = "receipt.stock.bootstrap.v1"
@@ -10,6 +10,19 @@ BOOTSTRAP_SCHEMA = "receipt.stock.bootstrap.v1"
 
 class StockManifestError(ValueError):
     """Invalid stock bootstrap manifest."""
+
+
+def _default_mount(subpath: str) -> str:
+    parts = PurePosixPath(subpath).parts
+    return parts[-1] if parts else ""
+
+
+def _validate_mount(value: str, *, source_id: str) -> str:
+    mount = str(value or "").strip().strip("/")
+    parts = PurePosixPath(mount).parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise StockManifestError(f"invalid package mount for {source_id}: {value!r}")
+    return "/".join(parts)
 
 
 def _validate_source(source: dict[str, Any]) -> dict[str, Any]:
@@ -30,12 +43,14 @@ def _validate_source(source: dict[str, Any]) -> dict[str, Any]:
     capabilities = sorted({str(item).strip() for item in source["capabilities"] if str(item).strip()})
     if not capabilities:
         raise StockManifestError(f"source has no capabilities: {source_id}")
+    mount = _validate_mount(source.get("mount") or _default_mount(subpath), source_id=source_id)
     return {
         **source,
         "id": source_id,
         "repository": repository,
         "commit": commit,
         "subpath": subpath,
+        "mount": mount,
         "license": str(source["license"]).strip(),
         "capabilities": capabilities,
     }
