@@ -116,7 +116,10 @@ def test_bootstrap_materializes_catalog_unit_index_and_query_without_execution(t
     unit_index = load_unit_index(stock_root)
     assert unit_index["schema"] == "receipt.stock.units.v1"
     assert unit_index["counts"]["units"] == 2
+    assert unit_index["security"]["contains_machine_local_origin"] is False
     assert all(unit["grants_execution_authority"] is False for unit in unit_index["units"])
+    assert all("origin" not in unit["source_identity"] for unit in unit_index["units"])
+    assert str(source_tree) not in json.dumps(unit_index)
 
     symbol_hits = find_units(stock_root, query="read_name")
     assert len(symbol_hits) == 1
