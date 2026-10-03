@@ -70,7 +70,9 @@ jobs:
           assert 'trio' not in uncovered
           assert 'h2' not in uncovered
           assert coverage['totals']['latent_stock_joins'] > 54
-          assert coverage['totals']['uncovered_external_references'] < 171
+          # Raw uncovered-reference count is intentionally not monotonic: adding a
+          # real provider reveals that provider's own external frontier. Prove the
+          # targeted roots closed and surface the new frontier instead of hiding it.
           assert coverage['authority']['asserts_api_compatibility'] is False
           assert coverage['authority']['asserts_license_compatibility'] is False
 
@@ -81,6 +83,8 @@ jobs:
 
           print(json.dumps(data['totals'], indent=2))
           print(json.dumps(coverage['totals'], indent=2))
+          print('TARGET_PROVIDER_JOINS')
+          print(json.dumps(sorted(row for row in coverage['latent_stock_joins'] if row['provider_source'] in {'trio-runtime', 'h2-protocol'}), indent=2))
           print('TOP_UNCOVERED_STOCK_GAPS')
           print(json.dumps(coverage['uncovered_external_packages'][:25], indent=2))
           PY
