@@ -9,6 +9,7 @@ from receipt_graft.evidence import canonical_fingerprint
 from receipt_graft.graph import build_stock_graph
 from receipt_stock.admission import evaluate_catalog
 from receipt_stock.manifest import github_spec, load_bootstrap_manifest
+from receipt_stock.mount import mount_catalog_payload
 from receipt_stock.query import write_unit_index
 
 STOCK_INDEX_SCHEMA = "receipt.stock.index.v1"
@@ -35,6 +36,7 @@ def _annotate_payload(
             "repository": source["repository"],
             "commit": source["commit"],
             "subpath": source["subpath"],
+            "mount": source["mount"],
             "license": source["license"],
             "source_capabilities": list(source["capabilities"]),
             "admission": admission,
@@ -54,7 +56,8 @@ def bootstrap_stock(
 
     External source code is never vendored into the Receipt repository. The manifest
     pins exact repository commits/subpaths; this function reconstructs durable
-    provenance-preserving catalogs, a source inventory, and a federated unit index.
+    provenance-preserving catalogs, restores each source's logical import-package
+    root, then emits source inventory and a federated unit index.
     """
     manifest = load_bootstrap_manifest(manifest_path)
     out = Path(out).expanduser().resolve()
@@ -73,6 +76,7 @@ def bootstrap_stock(
             force=force or not (catalog / "receipts.json").exists(),
             update=(catalog / "receipts.json").exists() and not force,
         )
+        payload = mount_catalog_payload(payload, catalog, source)
         admission = evaluate_catalog(payload, source_tags=source["capabilities"])
         enriched = _annotate_payload(payload, admission, source)
         write_json(catalog / "receipts.json", enriched)
@@ -101,6 +105,7 @@ def bootstrap_stock(
                 "repository": source["repository"],
                 "commit": source["commit"],
                 "subpath": source["subpath"],
+                "mount": source["mount"],
                 "license": source["license"],
                 "declared_capabilities": list(source["capabilities"]),
                 "observed_capabilities": admitted_tags,
