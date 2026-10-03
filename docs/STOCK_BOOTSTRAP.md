@@ -1,6 +1,6 @@
 # Receipt stock bootstrap
 
-Receipt stock bootstrap turns a small, reviewed manifest of pinned Python source trees into durable Receipt catalogs. It is inventory acquisition, not application execution.
+Receipt stock bootstrap turns a reviewed manifest of pinned Python source trees into durable Receipt catalogs. It is inventory acquisition, not application execution.
 
 ## Invariants
 
@@ -25,19 +25,26 @@ Soft evidence contributes to a deterministic score. Public contracts increase co
 
 ## Capability tags
 
-The bootstrap manifest provides broad source capabilities such as `cli`, `http-client`, and `data-modeling`. Receipt augments those with source-backed facts including environment access, dynamic loading, effect kinds, async callables, public API presence, and recognized dependency families.
+The bootstrap manifest provides broad source capabilities such as `cli`, `web-api`, `database`, `observability`, and `ai-client`. Receipt augments those with source-backed facts including environment access, dynamic loading, effect kinds, async callables, public API presence, and recognized dependency families.
 
 Tags describe available capability evidence. They do not decide what the user should build.
 
 ## Bundled bootstrap
 
-The initial bootstrap intentionally starts with compact, mature, already-real-stock-tested Python surfaces:
+The bundled bootstrap now covers the major reusable capability lanes Receipt needs for practical program assembly while keeping every lane pinned and provenance-preserving:
 
-- `pallets/click` — CLI/command infrastructure;
-- `psf/requests` — HTTP/network client infrastructure;
-- `python-attrs/attrs` — data-modeling, validation, typing and compatibility infrastructure.
+- `pallets/click` — CLI, command dispatch, configuration, terminal I/O;
+- `psf/requests` — synchronous HTTP/network client infrastructure;
+- `python-attrs/attrs` — data modeling, validation, typing, compatibility;
+- `fastapi/fastapi` — web APIs, routing, dependency injection, request validation, OpenAPI;
+- `encode/httpx` — synchronous/async HTTP, streaming, networking and authentication;
+- `sqlalchemy/sqlalchemy` — SQL, persistence, ORM and transaction infrastructure;
+- `pydantic/pydantic` — typed data models, validation, serialization and schema surfaces;
+- `agronholm/apscheduler` — scheduling, jobs, async runtime and coordination;
+- `hynek/structlog` — structured logging, context and observability;
+- `openai/openai-python` — AI client, tool-interface, structured-output and streaming surfaces.
 
-The manifest pins exact commits. Receipt does not vendor those repositories into its own Git history. Running the bootstrap reconstructs the catalogs from the pinned sources.
+The manifest pins exact commits. Receipt does not vendor those repositories into its own Git history. Running the bootstrap reconstructs the catalogs from the pinned sources and lets internal G.R.A.F.T.+ fingerprint each independent catalog.
 
 ```text
 receipt stock manifest
@@ -55,7 +62,14 @@ receipt-stock/
     ├── click-core/
     ├── requests-core/
     ├── attrs-modern/
-    └── attrs-compat/
+    ├── attrs-compat/
+    ├── fastapi-web/
+    ├── httpx-async-client/
+    ├── sqlalchemy-core/
+    ├── pydantic-models/
+    ├── apscheduler-runtime/
+    ├── structlog-observability/
+    └── openai-sdk/
 ```
 
 Each catalog retains normal Receipt raw/normalized/contracts/dependencies/topology evidence plus `admission.v1.json`; each receipt in `receipts.json` gains a `stock` envelope containing bootstrap provenance, license metadata, source capabilities, and its admission decision.
