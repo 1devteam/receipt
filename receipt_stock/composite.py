@@ -15,11 +15,23 @@ class StockCompositeError(ValueError):
     """Invalid or conflicting multi-source stock composition."""
 
 
-def _source_fingerprint(root: Path, source_id: str) -> str:
-    path = root / "catalogs" / source_id / "receipts.json"
-    if not path.is_file():
-        raise StockCompositeError(f"missing source catalog: {path.parent}")
-    return canonical_fingerprint(read_json(path))
+def _source_fingerprints(root: Path, source_ids: list[str]) -> dict[str, str]:
+    index_path = root / "stock-index.v1.json"
+    if not index_path.is_file():
+        raise StockCompositeError(f"missing stock index: {index_path}")
+    index = read_json(index_path)
+    rows = {
+        str(row.get("id") or ""): str(row.get("stock_graph_fingerprint") or "")
+        for row in index.get("sources") or []
+        if isinstance(row, dict)
+    }
+    result: dict[str, str] = {}
+    for source_id in source_ids:
+        fingerprint = rows.get(source_id)
+        if not fingerprint:
+            raise StockCompositeError(f"stock source lacks graph fingerprint: {source_id}")
+        result[source_id] = fingerprint
+    return result
 
 
 def _copy_if_present(source: Path, dest: Path) -> None:
@@ -62,20 +74,13 @@ def materialize_composite(
     *,
     stock_index_fingerprint: str,
 ) -> tuple[Path, dict[str, Any]]:
-    """Materialize a deterministic union catalog and recompute cross-source dependencies.
-
-    Entire selected source catalogs are unioned so the existing Receipt stack planner can
-    perform dependency closure from explicit seeds. No source is executed and no application
-    plan is invented here.
-    """
+    """Materialize a deterministic union catalog and recompute cross-source dependencies."""
     root = Path(stock_root).expanduser().resolve()
     selected_sources = sorted({str(value).strip() for value in source_ids if str(value).strip()})
     if len(selected_sources) < 2:
         raise StockCompositeError("composite requires at least two source catalogs")
 
-    source_fingerprints = {
-        source_id: _source_fingerprint(root, source_id) for source_id in selected_sources
-    }
+    source_fingerprints = _source_fingerprints(root, selected_sources)
     identity = {
         "schema": STOCK_COMPOSITE_SCHEMA,
         "stock_index_fingerprint": stock_index_fingerprint,
@@ -127,7 +132,6 @@ def materialize_composite(
                         }
                     )
                     continue
-                # Exact duplicate content at the same logical path is deterministic dedupe.
                 continue
 
             item = dict(rec)
@@ -136,7 +140,6 @@ def materialize_composite(
             stock = item.get("stock") if isinstance(item.get("stock"), dict) else {}
             licenses[source_id] = str(stock.get("license") or "")
             mounts[source_id] = str(stock.get("mount") or "")
-
             raw = item.get("raw")
             normalized = item.get("copy") or item.get("normalized")
             if raw:
@@ -156,17 +159,20 @@ def materialize_composite(
     rels = [str(rec["rel"]) for rec in rows]
     tops = tops_from_rels(rels)
     modules = modules_from_rels(rels)
-    cross_source_edges: list[dict[str, Any]] = []
-    source_by_module: dict[str, str] = {}
+    module_source: dict[str, str] = {}
     for rec in rows:
         source_id = str((rec.get("stock") or {}).get("bootstrap_source_id") or "")
         rel = str(rec.get("rel") or "")
-        stem = rel[:-3].replace("/", ".") if rel.endswith(".py") else rel.replace("/", ".")
-        if stem.endswith(".__init__"):
-            stem = stem[: -len(".__init__")]
-        source_by_module[stem] = source_id
+        if rel.endswith("/__init__.py"):
+            module = rel[: -len("/__init__.py")].replace("/", ".")
+        elif rel.endswith(".py"):
+            module = rel[:-3].replace("/", ".")
+        else:
+            continue
+        module_source[module] = source_id
 
     recomputed: list[dict[str, Any]] = []
+    cross_source_edges: list[dict[str, Any]] = []
     for rec in rows:
         item = dict(rec)
         normalized = item.get("copy") or item.get("normalized")
@@ -175,8 +181,11 @@ def materialize_composite(
         source_path = catalog / str(normalized)
         if not source_path.is_file():
             raise StockCompositeError(f"missing composite normalized source: {source_path}")
-        source = source_path.read_text(encoding="utf-8", errors="replace")
-        info = onboard_source(source, tops=tops, local_modules=modules)
+        info = onboard_source(
+            source_path.read_text(encoding="utf-8", errors="replace"),
+            tops=tops,
+            local_modules=modules,
+        )
         item["imports"] = info.get("imports") or []
         item["dependencies"] = info.get("dependencies") or {}
         item["topology"] = info.get("topology") or {}
@@ -190,8 +199,7 @@ def materialize_composite(
 
         from_source = str((item.get("stock") or {}).get("bootstrap_source_id") or "")
         for module in item["dependencies"].get("local") or []:
-            candidates = [module, module.rsplit(".", 1)[0] if "." in module else module]
-            to_source = next((source_by_module.get(candidate) for candidate in candidates if source_by_module.get(candidate)), None)
+            to_source = module_source.get(str(module))
             if to_source and to_source != from_source:
                 cross_source_edges.append(
                     {
@@ -226,7 +234,7 @@ def materialize_composite(
     artifact: dict[str, Any] = {
         **identity,
         "fingerprint": composite_id,
-        "catalog": str(catalog),
+        "catalog_rel": f"composites/{composite_id}",
         "mounts": mounts,
         "licenses": licenses,
         "license_compatibility_not_determined": True,
@@ -242,6 +250,11 @@ def materialize_composite(
             ),
         ),
         "cross_source_local_edge_count": len(cross_source_edges),
+        "security": {
+            "contains_machine_local_origin": False,
+            "contains_raw_source": False,
+            "contains_normalized_source": False,
+        },
         "grants_execution_authority": False,
         "implements_plan": False,
         "change_authority": "not-determined",
