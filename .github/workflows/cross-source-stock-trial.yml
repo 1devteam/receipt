@@ -1,0 +1,36 @@
+name: cross-source-stock-trial
+
+on:
+  pull_request:
+    paths:
+      - 'receipt_stock/**'
+      - 'collector/**'
+      - 'compiler/**'
+      - 'producer/**'
+      - 'receipt_cli/**'
+      - 'receipt_graft/**'
+      - 'scripts/validation/cross_source_stock_trial.py'
+      - '.github/workflows/cross-source-stock-trial.yml'
+  workflow_dispatch:
+
+jobs:
+  trial:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Receipt
+        run: python -m pip install -e '.[dev]'
+      - name: Bootstrap pinned permanent stock
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf /tmp/receipt-cross-stock /tmp/receipt-cross-built
+          receipt stock bootstrap -o /tmp/receipt-cross-stock
+      - name: Compose real FastAPI and Pydantic stock
+        run: |
+          python scripts/validation/cross_source_stock_trial.py \
+            /tmp/receipt-cross-stock \
+            --out /tmp/receipt-cross-built
