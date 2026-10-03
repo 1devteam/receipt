@@ -96,12 +96,43 @@ def _relative_target(rel: str, module: str) -> str | None:
     return "/".join(parent) if parent else None
 
 
+def _relative_package_target(rel: str, module: str) -> str | None:
+    """Resolve only the package portion of a relative import.
+
+    `inspect_source` intentionally preserves `from . import Name` as `.Name` so
+    graph evidence still knows the imported binding. During stack closure, if Name
+    is not itself a collected module, the dependency belongs to the package
+    `__init__.py` that exports the symbol. Exact module resolution always wins.
+    """
+    dots = len(module) - len(module.lstrip("."))
+    if dots <= 0:
+        return None
+    parent = list(PurePosixPath(rel).parent.parts)
+    ascend = dots - 1
+    if ascend > len(parent):
+        return None
+    if ascend:
+        parent = parent[:-ascend]
+    return "/".join(parent) if parent else None
+
+
 def _receipts_for_relative_dep(files: list[dict], from_rel: str, module: str) -> list[dict]:
     target = _relative_target(from_rel, module)
     if not target:
         return []
     candidates = (target + ".py", target + "/__init__.py")
-    return [f for f in files if f.get("rel") in candidates]
+    exact = [f for f in files if f.get("rel") in candidates]
+    if exact:
+        return exact
+
+    # `from . import Symbol` and `from .. import Symbol` are represented as
+    # `.Symbol` / `..Symbol`. If Symbol is not a collected module, close against
+    # the proven package initializer rather than inventing a missing Symbol.py.
+    package = _relative_package_target(from_rel, module)
+    if not package:
+        return []
+    init_rel = package + "/__init__.py"
+    return [f for f in files if f.get("rel") == init_rel]
 
 
 def close_local_deps(catalog: Path, seeds: list[dict]) -> dict:
