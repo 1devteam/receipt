@@ -39,7 +39,8 @@ jobs:
           data = json.loads((root / 'stock-index.v1.json').read_text())
           assert data['schema'] == 'receipt.stock.index.v1'
           assert len(data['sources']) == 4
-          assert data['totals']['files'] >= 100
+          # The bootstrap intentionally ingests focused library source trees, not tests/docs/vendor noise.
+          assert data['totals']['files'] >= 50
           assert data['totals']['accepted'] + data['totals']['constrained'] > 0
           assert data['totals']['rejected'] == 0
           assert data['fingerprint']
