@@ -1,6 +1,6 @@
 {
   "schema": "receipt.stock.bootstrap.v1",
-  "name": "receipt-core-stock-bootstrap",
+  "name": "receipt-capability-stock-bootstrap",
   "policy": {
     "provenance_required": true,
     "pinned_commits_required": true,
@@ -59,6 +59,104 @@
         "validation",
         "compatibility",
         "typing"
+      ]
+    },
+    {
+      "id": "fastapi-web",
+      "repository": "fastapi/fastapi",
+      "commit": "5f9fc5c59a9bb54608aa35376715f3ba9708188e",
+      "subpath": "fastapi",
+      "license": "MIT",
+      "capabilities": [
+        "web-api",
+        "routing",
+        "dependency-injection",
+        "request-validation",
+        "openapi"
+      ]
+    },
+    {
+      "id": "httpx-async-client",
+      "repository": "encode/httpx",
+      "commit": "b5addb64f0161ff6bfe94c124ef76f6a1fba5254",
+      "subpath": "httpx",
+      "license": "BSD-3-Clause",
+      "capabilities": [
+        "http-client",
+        "async-networking",
+        "network",
+        "streaming",
+        "authentication"
+      ]
+    },
+    {
+      "id": "sqlalchemy-core",
+      "repository": "sqlalchemy/sqlalchemy",
+      "commit": "3e4da2348053a45e5459e2660c493b22a4965e78",
+      "subpath": "lib/sqlalchemy",
+      "license": "MIT",
+      "capabilities": [
+        "database",
+        "sql",
+        "orm",
+        "persistence",
+        "transactions"
+      ]
+    },
+    {
+      "id": "pydantic-models",
+      "repository": "pydantic/pydantic",
+      "commit": "e87e11b7a74068c2d8107e48ffed6102744abef8",
+      "subpath": "pydantic",
+      "license": "MIT",
+      "capabilities": [
+        "data-modeling",
+        "validation",
+        "typing",
+        "serialization",
+        "schema"
+      ]
+    },
+    {
+      "id": "apscheduler-runtime",
+      "repository": "agronholm/apscheduler",
+      "commit": "b227d21fce2c8cca56dc421cbc07fa6eca7db541",
+      "subpath": "src/apscheduler",
+      "license": "MIT",
+      "capabilities": [
+        "scheduling",
+        "jobs",
+        "async-runtime",
+        "persistence",
+        "coordination"
+      ]
+    },
+    {
+      "id": "structlog-observability",
+      "repository": "hynek/structlog",
+      "commit": "91f44ae9031c80ad9c6045172f182803543ba6ba",
+      "subpath": "src/structlog",
+      "license": "MIT",
+      "capabilities": [
+        "logging",
+        "observability",
+        "structured-events",
+        "context",
+        "instrumentation"
+      ]
+    },
+    {
+      "id": "openai-sdk",
+      "repository": "openai/openai-python",
+      "commit": "becc1d20eed83c1b8d85e15dc131a372d9dc7813",
+      "subpath": "src/openai",
+      "license": "Apache-2.0",
+      "capabilities": [
+        "ai-client",
+        "tool-interfaces",
+        "structured-output",
+        "streaming",
+        "async-networking"
       ]
     }
   ],
